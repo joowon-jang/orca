@@ -21932,6 +21932,14 @@ export class OrcaRuntimeService {
     return Boolean(this.ptyController?.kill(ptyId))
   }
 
+  private async stopPtysAndWait(ptyIds: readonly string[]): Promise<boolean> {
+    // Why: the tab is already closed, so one rejected stop must not skip the remaining PTYs or cleanup.
+    const results = await Promise.allSettled(ptyIds.map((ptyId) => this.stopPtyAndWait(ptyId)))
+    return (
+      results.length > 0 && results.every((result) => result.status === 'fulfilled' && result.value)
+    )
+  }
+
   private resolveHandleForTab(tabId: string): string | null {
     for (const leaf of this.leaves.values()) {
       if (leaf.tabId === tabId && leaf.ptyId !== null) {
@@ -22011,27 +22019,17 @@ export class OrcaRuntimeService {
       // Why: a handle-addressed CLI/automation close is an explicit intent, so
       // it must stay destructive under the non-user close adjudication gate.
       await this.closeMobileSessionTab(`id:${pty.pty.worktreeId}`, tabId, { reason: 'user' })
-      const stopResults = await Promise.all(ptyIds.map((ptyId) => this.stopPtyAndWait(ptyId)))
+      const ptyKilled = await this.stopPtysAndWait(ptyIds)
       this.claudeAgentTeams.removeTeamForLeaderHandle(handle)
-      return {
-        handle,
-        tabId,
-        closeMode: 'tab',
-        ptyKilled: stopResults.length > 0 && stopResults.every(Boolean)
-      }
+      return { handle, tabId, closeMode: 'tab', ptyKilled }
     }
     this.assertGraphReady()
     const { leaf } = this.getLiveLeafForHandle(handle)
     const ptyIds = this.getPtyIdsInTab(leaf.worktreeId, leaf.tabId)
     await this.closeMobileSessionTab(`id:${leaf.worktreeId}`, leaf.tabId, { reason: 'user' })
-    const stopResults = await Promise.all(ptyIds.map((ptyId) => this.stopPtyAndWait(ptyId)))
+    const ptyKilled = await this.stopPtysAndWait(ptyIds)
     this.claudeAgentTeams.removeTeamForLeaderHandle(handle)
-    return {
-      handle,
-      tabId: leaf.tabId,
-      closeMode: 'tab',
-      ptyKilled: stopResults.length > 0 && stopResults.every(Boolean)
-    }
+    return { handle, tabId: leaf.tabId, closeMode: 'tab', ptyKilled }
   }
 
   async splitTerminal(

@@ -20056,13 +20056,14 @@ describe('OrcaRuntimeService', () => {
     const runtime = new OrcaRuntimeService(runtimeStore as never)
     runtime.setNotifier({ closeTerminal: vi.fn(), closeTerminalTab } as never)
     const stopped = makeDeferred()
+    const kill = vi.fn(() => true)
     const stopAndWait = vi.fn(async () => {
       await stopped.promise
       return true
     })
     runtime.setPtyController({
       write: () => true,
-      kill: () => true,
+      kill,
       stopAndWait,
       getForegroundProcess: async () => null,
       listProcesses: async () => []
@@ -20108,9 +20109,10 @@ describe('OrcaRuntimeService', () => {
       ptyKilled: true
     })
     expect(stopAndWait).toHaveBeenCalledWith('persisted-pty')
+    expect(kill).not.toHaveBeenCalled()
   })
 
-  it('durably closes every split leaf without a renderer', async () => {
+  it('durably closes every split leaf when one physical stop rejects', async () => {
     const { runtimeStore, getSession } = makeRuntimeStoreWithWorkspaceSession(
       makeWorkspaceSessionWithHeadlessTerminal({
         tabsByWorktree: {
@@ -20138,7 +20140,12 @@ describe('OrcaRuntimeService', () => {
       .mockResolvedValueOnce({ id: 'headless-left' })
       .mockResolvedValueOnce({ id: 'headless-right' })
     const kill = vi.fn(() => true)
-    const stopAndWait = vi.fn().mockResolvedValue(true)
+    const stopAndWait = vi.fn(async (ptyId: string) => {
+      if (ptyId === 'headless-right') {
+        throw new Error('physical stop failed')
+      }
+      return true
+    })
     const runtime = new OrcaRuntimeService({ ...runtimeStore, flushOrThrow } as never)
     runtime.setPtyController({
       spawn,
@@ -20154,7 +20161,12 @@ describe('OrcaRuntimeService', () => {
     })
     await runtime.splitTerminal(terminal.handle, { direction: 'vertical' })
 
-    await runtime.closeTerminalTab(terminal.handle)
+    await expect(runtime.closeTerminalTab(terminal.handle)).resolves.toEqual({
+      handle: terminal.handle,
+      tabId: 'durable-tab',
+      closeMode: 'tab',
+      ptyKilled: false
+    })
 
     expect(kill).toHaveBeenCalledWith('headless-left')
     expect(kill).toHaveBeenCalledWith('headless-right')
