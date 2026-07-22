@@ -69,6 +69,7 @@ describe('TerminalHost', () => {
 
   beforeEach(() => {
     killWithDescendantSweepMock.mockReset()
+    killWithDescendantSweepMock.mockImplementation((_pid: number, kill: () => void) => kill())
     spawnFn = vi.fn(() => {
       const sub = createMockSubprocess() as ReturnType<typeof createMockSubprocess> & {
         _onDataCb: ((data: string) => void) | null
@@ -425,7 +426,7 @@ describe('TerminalHost', () => {
 
       expect(lastSubprocess.kill).not.toHaveBeenCalled()
       expect(lastSubprocess.forceKill).toHaveBeenCalled()
-      expect(killWithDescendantSweepMock).not.toHaveBeenCalled()
+      expect(killWithDescendantSweepMock).toHaveBeenCalledOnce()
       expect(lastSubprocess.dispose).not.toHaveBeenCalled()
       expect(host.listSessions()).toHaveLength(1)
 
@@ -512,6 +513,7 @@ describe('TerminalHost', () => {
         streamClient: { onData: vi.fn(), onExit: vi.fn() }
       })
       lastSubprocess.forceKill = vi.fn()
+      killWithDescendantSweepMock.mockReset()
 
       const killing = host.kill('agent-1', { immediate: true })
 

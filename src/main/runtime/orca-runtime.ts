@@ -21910,6 +21910,28 @@ export class OrcaRuntimeService {
     return count
   }
 
+  private getPtyIdsInTab(worktreeId: string, tabId: string): string[] {
+    const ptyIds = new Set<string>()
+    for (const leaf of this.leaves.values()) {
+      if (leaf.worktreeId === worktreeId && leaf.tabId === tabId && leaf.ptyId) {
+        ptyIds.add(leaf.ptyId)
+      }
+    }
+    for (const pty of this.ptysById.values()) {
+      if (pty.worktreeId === worktreeId && pty.tabId === tabId && pty.connected) {
+        ptyIds.add(pty.ptyId)
+      }
+    }
+    return [...ptyIds]
+  }
+
+  private async stopPtyAndWait(ptyId: string): Promise<boolean> {
+    if (this.ptyController?.stopAndWait) {
+      return await this.ptyController.stopAndWait(ptyId)
+    }
+    return Boolean(this.ptyController?.kill(ptyId))
+  }
+
   private resolveHandleForTab(tabId: string): string | null {
     for (const leaf of this.leaves.values()) {
       if (leaf.tabId === tabId && leaf.ptyId !== null) {
@@ -21961,14 +21983,14 @@ export class OrcaRuntimeService {
     const pty = this.getLivePtyForHandle(handle)
     this.claudeAgentTeams.removeTeamForLeaderHandle(handle)
     if (pty) {
-      const ptyKilled = this.ptyController?.kill(pty.pty.ptyId) ?? false
+      const ptyKilled = await this.stopPtyAndWait(pty.pty.ptyId)
       return { handle, tabId: pty.pty.tabId ?? pty.record.tabId, ptyKilled }
     }
     this.assertGraphReady()
     const { leaf } = this.getLiveLeafForHandle(handle)
     let ptyKilled = false
     if (leaf.ptyId) {
-      ptyKilled = this.ptyController?.kill(leaf.ptyId) ?? false
+      ptyKilled = await this.stopPtyAndWait(leaf.ptyId)
     }
     // Why: in a multi-pane tab, killing the PTY is enough (renderer's exit handler closes the pane); an extra IPC close would race it and close the whole tab.
     const siblingCount = this.countLeavesInTab(leaf.tabId)
@@ -21985,17 +22007,31 @@ export class OrcaRuntimeService {
       if (!tabId) {
         throw new Error('terminal_tab_not_found')
       }
+      const ptyIds = this.getPtyIdsInTab(pty.pty.worktreeId, tabId)
       // Why: a handle-addressed CLI/automation close is an explicit intent, so
       // it must stay destructive under the non-user close adjudication gate.
       await this.closeMobileSessionTab(`id:${pty.pty.worktreeId}`, tabId, { reason: 'user' })
+      const stopResults = await Promise.all(ptyIds.map((ptyId) => this.stopPtyAndWait(ptyId)))
       this.claudeAgentTeams.removeTeamForLeaderHandle(handle)
-      return { handle, tabId, closeMode: 'tab', ptyKilled: false }
+      return {
+        handle,
+        tabId,
+        closeMode: 'tab',
+        ptyKilled: stopResults.length > 0 && stopResults.every(Boolean)
+      }
     }
     this.assertGraphReady()
     const { leaf } = this.getLiveLeafForHandle(handle)
+    const ptyIds = this.getPtyIdsInTab(leaf.worktreeId, leaf.tabId)
     await this.closeMobileSessionTab(`id:${leaf.worktreeId}`, leaf.tabId, { reason: 'user' })
+    const stopResults = await Promise.all(ptyIds.map((ptyId) => this.stopPtyAndWait(ptyId)))
     this.claudeAgentTeams.removeTeamForLeaderHandle(handle)
-    return { handle, tabId: leaf.tabId, closeMode: 'tab', ptyKilled: false }
+    return {
+      handle,
+      tabId: leaf.tabId,
+      closeMode: 'tab',
+      ptyKilled: stopResults.length > 0 && stopResults.every(Boolean)
+    }
   }
 
   async splitTerminal(

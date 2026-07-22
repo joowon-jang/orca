@@ -115,7 +115,7 @@ describe('captureDescendantSnapshot', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('is a null no-op on Windows', async () => {
+  it('does not use the POSIX process-table reader on Windows', async () => {
     const readTable = vi.fn()
     expect(await captureDescendantSnapshot(10, { readTable, platform: 'win32' })).toBeNull()
     expect(readTable).not.toHaveBeenCalled()
@@ -346,6 +346,43 @@ describe('killWithDescendantSweep', () => {
     expect(killRoot).toHaveBeenCalledOnce()
     expect(sendSignal.mock.calls).toEqual([[20, 'SIGTERM']])
     expect(events).toEqual(['descendant-term', 'root-kill'])
+  })
+
+  it('terminates the Windows process tree before closing the ConPTY root', async () => {
+    const events: string[] = []
+    const terminateWindowsTree = vi.fn(async () => {
+      events.push('tree-kill')
+    })
+    const killRoot = vi.fn(() => events.push('root-kill'))
+
+    await killWithDescendantSweep(10, killRoot, {
+      platform: 'win32',
+      terminateWindowsTree
+    })
+
+    expect(terminateWindowsTree).toHaveBeenCalledWith(10)
+    expect(events).toEqual(['tree-kill', 'root-kill'])
+  })
+
+  it('still closes the Windows root when process-tree termination fails', async () => {
+    const killRoot = vi.fn()
+    await killWithDescendantSweep(10, killRoot, {
+      platform: 'win32',
+      terminateWindowsTree: vi.fn().mockRejectedValue(new Error('taskkill failed'))
+    })
+    expect(killRoot).toHaveBeenCalledOnce()
+  })
+
+  it('does not target a Windows pid after root ownership is lost', async () => {
+    const terminateWindowsTree = vi.fn()
+    const killRoot = vi.fn()
+    await killWithDescendantSweep(10, killRoot, {
+      platform: 'win32',
+      ownsRoot: () => false,
+      terminateWindowsTree
+    })
+    expect(terminateWindowsTree).not.toHaveBeenCalled()
+    expect(killRoot).toHaveBeenCalledOnce()
   })
 
   it('still kills the root when the snapshot is unavailable', async () => {

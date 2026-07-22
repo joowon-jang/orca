@@ -20013,11 +20013,13 @@ describe('OrcaRuntimeService', () => {
   it('operates PTY-backed mobile session terminals without a renderer graph', async () => {
     const spawn = vi.fn().mockResolvedValue({ id: 'laptop-created-pty' })
     const kill = vi.fn(() => true)
+    const stopAndWait = vi.fn().mockResolvedValue(true)
     const runtime = new OrcaRuntimeService(store)
     runtime.setPtyController({
       spawn,
       write: () => true,
       kill,
+      stopAndWait,
       getForegroundProcess: async () => null
     })
 
@@ -20041,10 +20043,11 @@ describe('OrcaRuntimeService', () => {
       tabId: 'laptop-tab',
       ptyKilled: true
     })
-    expect(kill).toHaveBeenCalledWith('laptop-created-pty')
+    expect(stopAndWait).toHaveBeenCalledWith('laptop-created-pty')
+    expect(kill).not.toHaveBeenCalled()
   })
 
-  it('waits for renderer acknowledgement before returning a whole-tab close receipt', async () => {
+  it('waits for renderer acknowledgement and PTY exit before returning a whole-tab close receipt', async () => {
     const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(
       makeWorkspaceSessionWithHeadlessTerminal()
     )
@@ -20052,9 +20055,15 @@ describe('OrcaRuntimeService', () => {
     const closeTerminalTab = vi.fn(() => acknowledged.promise)
     const runtime = new OrcaRuntimeService(runtimeStore as never)
     runtime.setNotifier({ closeTerminal: vi.fn(), closeTerminalTab } as never)
+    const stopped = makeDeferred()
+    const stopAndWait = vi.fn(async () => {
+      await stopped.promise
+      return true
+    })
     runtime.setPtyController({
       write: () => true,
       kill: () => true,
+      stopAndWait,
       getForegroundProcess: async () => null,
       listProcesses: async () => []
     })
@@ -20089,12 +20098,16 @@ describe('OrcaRuntimeService', () => {
     expect(settled).toBe(false)
 
     acknowledged.resolve()
+    await vi.waitFor(() => expect(stopAndWait).toHaveBeenCalledWith('persisted-pty'))
+    expect(settled).toBe(false)
+    stopped.resolve()
     await expect(pending).resolves.toEqual({
       handle: terminal.handle,
       tabId: 'host-tab',
       closeMode: 'tab',
-      ptyKilled: false
+      ptyKilled: true
     })
+    expect(stopAndWait).toHaveBeenCalledWith('persisted-pty')
   })
 
   it('durably closes every split leaf without a renderer', async () => {
@@ -20125,11 +20138,13 @@ describe('OrcaRuntimeService', () => {
       .mockResolvedValueOnce({ id: 'headless-left' })
       .mockResolvedValueOnce({ id: 'headless-right' })
     const kill = vi.fn(() => true)
+    const stopAndWait = vi.fn().mockResolvedValue(true)
     const runtime = new OrcaRuntimeService({ ...runtimeStore, flushOrThrow } as never)
     runtime.setPtyController({
       spawn,
       write: () => true,
       kill,
+      stopAndWait,
       getForegroundProcess: async () => null
     })
     runtime.syncWindowGraph(0, { tabs: [], leaves: [] })
@@ -20143,6 +20158,8 @@ describe('OrcaRuntimeService', () => {
 
     expect(kill).toHaveBeenCalledWith('headless-left')
     expect(kill).toHaveBeenCalledWith('headless-right')
+    expect(stopAndWait).toHaveBeenCalledWith('headless-left')
+    expect(stopAndWait).toHaveBeenCalledWith('headless-right')
     expect(getSession().tabsByWorktree[TEST_WORKTREE_ID]).toEqual([])
     expect(getSession().terminalLayoutsByTabId['durable-tab']).toBeUndefined()
     expect(flushOrThrow).toHaveBeenCalledTimes(1)
