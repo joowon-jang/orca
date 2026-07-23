@@ -242,8 +242,6 @@ export async function killWithDescendantSweep(
       if (deps.ownsRoot?.() ?? true) {
         await (deps.terminateWindowsTree ?? terminateWindowsProcessTree)(rootPid)
       }
-    } catch {
-      // Root teardown remains the fallback when Windows tree termination is unavailable.
     } finally {
       killRoot()
     }

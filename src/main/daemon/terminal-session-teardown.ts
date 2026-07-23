@@ -88,9 +88,14 @@ export class TerminalSessionTeardown {
         }
       )
     )
-    // Why: descendant capture completion only proves signals were requested;
-    // destructive callers must retain the native owner until OS-confirmed exit.
-    const operation = sweep.then(() => entry.rootCompletion)
+    // Why: sweep failure still must retain the native owner until OS-confirmed root exit.
+    const operation = sweep.then(
+      () => entry.rootCompletion,
+      async (error: unknown) => {
+        await entry.rootCompletion
+        throw error
+      }
+    )
     entry.promise = operation
     this.operations.set(sessionId, entry)
     const clearOperation = (): void => {

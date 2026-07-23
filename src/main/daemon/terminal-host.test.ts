@@ -506,7 +506,7 @@ describe('TerminalHost', () => {
       expect(() => host.kill('missing')).toThrow('Session not found')
     })
 
-    it('agent immediate kill routes through the descendant sweep before force-kill', async () => {
+    it('waits for physical exit before surfacing a descendant sweep failure', async () => {
       await host.createOrAttach({
         sessionId: 'agent-1',
         cols: 80,
@@ -515,26 +515,22 @@ describe('TerminalHost', () => {
         streamClient: { onData: vi.fn(), onExit: vi.fn() }
       })
       lastSubprocess.forceKill = vi.fn()
+      killWithDescendantSweepMock.mockImplementation(async (_pid: number, killRoot: () => void) => {
+        killRoot()
+        throw new Error('taskkill failed')
+      })
 
       const killing = host.kill('agent-1', { immediate: true })
-
-      // Why: force-killing first reparents descendants to pid 1 before the sweep can find them.
-      expect(killWithDescendantSweepMock).toHaveBeenCalledWith(
-        99999,
-        expect.any(Function),
-        expect.objectContaining({ ownsRoot: expect.any(Function) })
+      let settled = false
+      void killing.then(
+        () => (settled = true),
+        () => (settled = true)
       )
-      expect(lastSubprocess.forceKill).toHaveBeenCalled()
-      const [sweepOrder] = killWithDescendantSweepMock.mock.invocationCallOrder
-      const [forceKillOrder] = vi.mocked(lastSubprocess.forceKill).mock.invocationCallOrder
-      expect(sweepOrder).toBeLessThan(forceKillOrder)
-      expect(host.isKilled('agent-1')).toBe(true)
-
-      expect(lastSubprocess.dispose).not.toHaveBeenCalled()
-
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      const settledBeforeExit = settled
       lastSubprocess._onExitCb?.(137)
-      await killing
-      expect(lastSubprocess.dispose).toHaveBeenCalled()
+      await expect(killing).rejects.toThrow('taskkill failed')
+      expect(settledBeforeExit).toBe(false)
     })
 
     it('rejects reattach while an agent immediate-kill snapshot is pending', async () => {

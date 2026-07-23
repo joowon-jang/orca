@@ -394,12 +394,14 @@ describe('killWithDescendantSweep', () => {
     expect(events).toEqual(['tree-kill', 'root-kill'])
   })
 
-  it('still closes the Windows root when process-tree termination fails', async () => {
+  it('closes the Windows root and reports process-tree termination failure', async () => {
     const killRoot = vi.fn()
-    await killWithDescendantSweep(10, killRoot, {
-      platform: 'win32',
-      terminateWindowsTree: vi.fn().mockRejectedValue(new Error('taskkill failed'))
-    })
+    await expect(
+      killWithDescendantSweep(10, killRoot, {
+        platform: 'win32',
+        terminateWindowsTree: vi.fn().mockRejectedValue(new Error('taskkill failed'))
+      })
+    ).rejects.toThrow('taskkill failed')
     expect(killRoot).toHaveBeenCalledOnce()
   })
 
