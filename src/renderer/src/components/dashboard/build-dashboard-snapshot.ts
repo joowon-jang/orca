@@ -14,6 +14,7 @@ import { buildWorktreeAgentRows } from '../sidebar/worktree-agent-rows'
 import {
   selectLiveAgentStatusEntriesForWorktree,
   selectMigrationUnsupportedEntriesForWorktree,
+  selectPaneForegroundAgentEntriesForWorktree,
   selectRetainedAgentEntriesForWorktree,
   selectRuntimeAgentOrchestrationForWorktree,
   selectTerminalLayoutsForWorktree
@@ -37,6 +38,7 @@ export type DashboardSnapshotState = Pick<
   | 'terminalLayoutsByTabId'
   | 'ptyIdsByTabId'
   | 'runtimePaneTitlesByTabId'
+  | 'paneForegroundAgentByPaneKey'
   | 'acknowledgedAgentsByPaneKey'
 >
 
@@ -110,6 +112,10 @@ export function buildDashboardSnapshot(
             state,
             worktreeId
           ),
+          paneForegroundAgentByPaneKey: selectPaneForegroundAgentEntriesForWorktree(
+            state,
+            worktreeId
+          ),
           now
         })
       )
@@ -119,8 +125,8 @@ export function buildDashboardSnapshot(
         if (row.rowSource === 'subagent') {
           continue
         }
-        // Title-derived rows (a live pane read only from its terminal title, no
-        // agent-hook status) carry synthetic prompt/lastAssistantMessage — the
+        // Fallback rows (a live pane read from title/process evidence, without
+        // an agent hook) carry synthetic prompt/lastAssistantMessage — the
         // agent LABEL and a status word like "Idle". They're marked by
         // startedAt === 0, and must NOT be shown as real conversation.
         const isTitleDerived = row.startedAt === 0
