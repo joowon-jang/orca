@@ -280,7 +280,9 @@ function Settings(): React.JSX.Element {
   const settings = useAppStore((s) => s.settings)
   const keybindings = useAppStore((s) => s.keybindings)
   const updateSettings = useAppStore((s) => s.updateSettings)
-  const switchRuntimeEnvironment = useAppStore((s) => s.switchRuntimeEnvironment)
+  const setActiveRuntimeEnvironmentPreference = useAppStore(
+    (s) => s.setActiveRuntimeEnvironmentPreference
+  )
   const fetchSettings = useAppStore((s) => s.fetchSettings)
   const fetchKeybindings = useAppStore((s) => s.fetchKeybindings)
   const closeSettingsPage = useAppStore((s) => s.closeSettingsPage)
@@ -293,6 +295,7 @@ function Settings(): React.JSX.Element {
   const settingsNavigationTarget = useAppStore((s) => s.settingsNavigationTarget)
   const clearSettingsTarget = useAppStore((s) => s.clearSettingsTarget)
   const settingsProjectHostSelection = useAppStore((s) => s.settingsProjectHostSelection)
+  const settingsProjectSetupSelection = useAppStore((s) => s.settingsProjectSetupSelection)
   const setSettingsProjectHostSelection = useAppStore((s) => s.setSettingsProjectHostSelection)
   const settingsSearchInputQuery = useAppStore((s) => s.settingsSearchInputQuery)
   const settingsSearchQuery = useAppStore((s) => s.settingsSearchQuery)
@@ -871,14 +874,21 @@ function Settings(): React.JSX.Element {
       const repo = getSettingsProjectHostRepo(
         settingsProject,
         repos,
-        settingsProjectHostSelection[settingsProject.projectId]
+        settingsProjectHostSelection[settingsProject.projectId],
+        settingsProjectSetupSelection[settingsProject.projectId]
       )
       if (repo) {
         reposByHostIdentity.set(getRepoHostIdentity(repo), repo)
       }
     }
     return [...reposByHostIdentity.values()]
-  }, [neededSectionIds, repos, settingsProjectHostSelection, settingsProjectList])
+  }, [
+    neededSectionIds,
+    repos,
+    settingsProjectHostSelection,
+    settingsProjectList,
+    settingsProjectSetupSelection
+  ])
 
   useEffect(() => {
     const repoHostIdentitySet = new Set(repos.map(getRepoHostIdentity))
@@ -1604,7 +1614,7 @@ function Settings(): React.JSX.Element {
                   {isSectionMounted('servers') ? (
                     <RuntimeEnvironmentsPane
                       settings={settings}
-                      switchRuntimeEnvironment={switchRuntimeEnvironment}
+                      setActiveRuntimeEnvironmentPreference={setActiveRuntimeEnvironmentPreference}
                       canGeneratePairingUrl={!isWebClient}
                       allowLocalRuntime={!isWebClient}
                       addServerIntentSignal={remoteServerAddIntentSignal}
@@ -1720,7 +1730,8 @@ function Settings(): React.JSX.Element {
                   const repo = getSettingsProjectHostRepo(
                     settingsProject,
                     repos,
-                    settingsProjectHostSelection[settingsProject.projectId]
+                    settingsProjectHostSelection[settingsProject.projectId],
+                    settingsProjectSetupSelection[settingsProject.projectId]
                   )
                   if (!repo) {
                     return null
@@ -1753,6 +1764,9 @@ function Settings(): React.JSX.Element {
                           updateRepo={updateRepo}
                           removeProject={() => void removeProjectAllHosts(settingsProject.setups)}
                           project={project}
+                          selectedProjectSetupId={
+                            settingsProjectSetupSelection[settingsProject.projectId]
+                          }
                           isLocalWindowsProject={
                             getRepoExecutionHostId(repo) === LOCAL_EXECUTION_HOST_ID &&
                             isWindowsTerminalHost

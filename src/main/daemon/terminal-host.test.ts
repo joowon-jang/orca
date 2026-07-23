@@ -68,8 +68,7 @@ describe('TerminalHost', () => {
   }
 
   beforeEach(() => {
-    killWithDescendantSweepMock.mockReset()
-    killWithDescendantSweepMock.mockImplementation((_pid: number, kill: () => void) => kill())
+    killWithDescendantSweepMock.mockReset().mockImplementation((_pid, kill) => kill())
     spawnFn = vi.fn(() => {
       const sub = createMockSubprocess() as ReturnType<typeof createMockSubprocess> & {
         _onDataCb: ((data: string) => void) | null
@@ -84,6 +83,9 @@ describe('TerminalHost', () => {
   afterEach(async () => {
     await host.dispose()
   })
+
+  it('rejects missing strict inspection', () =>
+    expect(() => host.inspectProcess('missing-session')).toThrow('not found'))
 
   describe('createOrAttach', () => {
     it('creates a new session when none exists', async () => {
@@ -504,7 +506,7 @@ describe('TerminalHost', () => {
       expect(() => host.kill('missing')).toThrow('Session not found')
     })
 
-    it('agent immediate kill routes through the descendant sweep and defers the force-kill to it', async () => {
+    it('agent immediate kill routes through the descendant sweep before force-kill', async () => {
       await host.createOrAttach({
         sessionId: 'agent-1',
         cols: 80,
@@ -513,23 +515,21 @@ describe('TerminalHost', () => {
         streamClient: { onData: vi.fn(), onExit: vi.fn() }
       })
       lastSubprocess.forceKill = vi.fn()
-      killWithDescendantSweepMock.mockReset()
 
       const killing = host.kill('agent-1', { immediate: true })
 
-      // Why order matters: force-killing first would let orphans reparent to
-      // pid 1 and escape the sweep's ppid walk entirely.
+      // Why: force-killing first reparents descendants to pid 1 before the sweep can find them.
       expect(killWithDescendantSweepMock).toHaveBeenCalledWith(
         99999,
         expect.any(Function),
         expect.objectContaining({ ownsRoot: expect.any(Function) })
       )
-      expect(lastSubprocess.forceKill).not.toHaveBeenCalled()
+      expect(lastSubprocess.forceKill).toHaveBeenCalled()
+      const [sweepOrder] = killWithDescendantSweepMock.mock.invocationCallOrder
+      const [forceKillOrder] = vi.mocked(lastSubprocess.forceKill).mock.invocationCallOrder
+      expect(sweepOrder).toBeLessThan(forceKillOrder)
       expect(host.isKilled('agent-1')).toBe(true)
 
-      const finish = killWithDescendantSweepMock.mock.calls[0][1] as () => void
-      finish()
-      expect(lastSubprocess.forceKill).toHaveBeenCalled()
       expect(lastSubprocess.dispose).not.toHaveBeenCalled()
 
       lastSubprocess._onExitCb?.(137)
@@ -885,6 +885,8 @@ describe('TerminalHost', () => {
     })
 
     it('does not list exited sessions', async () => {
+      const onSessionReaped = vi.fn()
+      host = new TerminalHost({ spawnSubprocess: spawnFn as MockSpawnFn, onSessionReaped })
       await host.createOrAttach({
         sessionId: 'session-1',
         cols: 80,
@@ -894,6 +896,7 @@ describe('TerminalHost', () => {
 
       lastSubprocess._onExitCb?.(0)
       expect(host.listSessions()).toEqual([])
+      expect(onSessionReaped).toHaveBeenCalledWith('session-1')
     })
 
     it('never force-kills an exited session (recycled-pid SIGKILL safety)', async () => {
