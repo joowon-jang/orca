@@ -175,7 +175,11 @@ async function runWindowsSweep(
       if (target === 'own' && (deps.ownsRoot?.() ?? true)) {
         const killTree =
           deps.killWindowsTree ??
-          ((pid: number) => terminateWindowsProcessTree(pid, { timeoutMs: treeKillMs }))
+          ((pid: number) =>
+            terminateWindowsProcessTree(pid, {
+              timeoutMs: treeKillMs,
+              site: 'pty-descendant-sweep'
+            }))
         // Why not awaited here: taskkill's own timeout stacked behind the
         // identity probe above can exceed the daemon's shutdown budget, which
         // let killRoot get skipped entirely when the outer shutdown race gave

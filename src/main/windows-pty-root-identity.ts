@@ -1,4 +1,5 @@
-import { queryWindowsProcessRowsFresh } from './providers/windows-foreground-process-rows'
+import { queryWindowsProcessLinksFresh } from './providers/windows-foreground-process-rows'
+import { readOrcaChromiumProcessPids } from './orca-chromium-process-pids'
 import { readWindowsProcessTableFresh } from './windows/windows-process-table'
 
 /**
@@ -41,18 +42,29 @@ export type WindowsIdentityRowReader = () => Promise<readonly WindowsIdentityRow
  * Known limit (#10680): a recycle that lands on one of our OWN descendants —
  * another pane's shell, an agent CLI, a `git.exe` we spawned — still reads
  * `own`. That is not remote during teardown, when Orca is itself the process
- * allocating pids. Pass `expectedCreationTimeMs` (captured at spawn) to close
- * it: a recycled PID has a different creation time and resolves `foreign`.
+ * allocating pids. Closing it needs real identity (a `Win32_Process.CreationDate`
+ * baseline, the analogue of the POSIX `lstart` check, or an inherited handle /
+ * Job Object). The Chromium-process half of it IS closed: `ownChromiumPids`
+ * refuses any pid Electron is currently accounting for. Pass
+ * `expectedCreationTimeMs` (captured at spawn) to close the remainder: a
+ * recycled PID has a different creation time and resolves `foreign`.
  */
 export function classifyWindowsTreeKillTarget(
   rootPid: number,
   rows: readonly ProcessLink[],
-  ownerPid: number
+  ownerPid: number,
+  ownChromiumPids: ReadonlySet<number> = readOrcaChromiumProcessPids()
 ): WindowsTreeKillTarget {
   // Why: our own pid is never a PTY root, so reading it here means the pid is
   // corrupt. `foreign` is the refusing verdict, which is what that must get —
   // `taskkill /T /F` on ourselves would take Orca and every pane down with it.
   if (!Number.isInteger(rootPid) || rootPid <= 0 || rootPid === ownerPid) {
+    return 'foreign'
+  }
+  // Same reasoning one hop out: our renderer, GPU and utility children are all
+  // direct children of ownerPid, so the ancestry walk below calls them `own` and
+  // hands teardown a licence to taskkill /T /F Orca's own UI (#10680).
+  if (ownChromiumPids.has(rootPid)) {
     return 'foreign'
   }
   const parentByPid = new Map<number, number | null>()
@@ -144,14 +156,16 @@ export async function verifyWindowsTreeKillTarget(
     readRows?: WindowsProcessLinkReader
     readIdentityRows?: WindowsIdentityRowReader
     ownerPid?: number
+    ownChromiumPids?: ReadonlySet<number>
     platform?: NodeJS.Platform
     timeoutMs?: number
     /**
      * Creation time captured at spawn. When set, an `own` ancestry verdict
      * additionally requires the root row's creation time to match — a
      * recycled PID landing on another Orca descendant resolves `foreign`
-     * instead (#10680). When the table carries no creation times (older
-     * addon builds), verification degrades to the ancestry walk.
+     * instead (#10680). A root row without a creation time resolves
+     * `unknown`: with a baseline set, a missing value cannot prove this PID
+     * is still the spawned root, so verification refuses the kill.
      */
     expectedCreationTimeMs?: number
   } = {}
@@ -164,13 +178,18 @@ export async function verifyWindowsTreeKillTarget(
   const timeoutMs = deps.timeoutMs ?? WINDOWS_ROOT_IDENTITY_TIMEOUT_MS
   if (deps.expectedCreationTimeMs === undefined) {
     const rows = await readLinksBeforeDeadline(
-      deps.readRows ?? queryWindowsProcessRowsFresh,
+      deps.readRows ?? queryWindowsProcessLinksFresh,
       timeoutMs
     )
     if (!rows) {
       return 'unknown'
     }
-    return classifyWindowsTreeKillTarget(rootPid, rows, deps.ownerPid ?? process.pid)
+    return classifyWindowsTreeKillTarget(
+      rootPid,
+      rows,
+      deps.ownerPid ?? process.pid,
+      deps.ownChromiumPids ?? readOrcaChromiumProcessPids()
+    )
   }
   const rows = await readLinksBeforeDeadline(
     deps.readIdentityRows ?? readIdentityRowsFresh,
@@ -180,7 +199,12 @@ export async function verifyWindowsTreeKillTarget(
     return 'unknown'
   }
   const ownerPid = deps.ownerPid ?? process.pid
-  const verdict = classifyWindowsTreeKillTarget(rootPid, rows, ownerPid)
+  const verdict = classifyWindowsTreeKillTarget(
+    rootPid,
+    rows,
+    ownerPid,
+    deps.ownChromiumPids ?? readOrcaChromiumProcessPids()
+  )
   if (verdict !== 'own') {
     return verdict
   }
