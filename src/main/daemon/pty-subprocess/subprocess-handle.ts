@@ -23,7 +23,6 @@ export function createDaemonPtySubprocessHandle(args: {
   requestedCwd?: string
   sessionId: string
   startupAgentRecognition: RecognizedAgentProcess | null
-  rootCreationTimeMs?: number
 }): SubprocessHandle {
   const proc = args.process
   // node-pty exposes destroy at runtime but omits it from IPty.
@@ -62,16 +61,11 @@ export function createDaemonPtySubprocessHandle(args: {
   })
 
   const slavePath = readPtySlavePath(proc)
-  // Why assembled here, not plumbed as an arg: the spawn env already carries
-  // the marker and the creation time arrives beside it, so the handle
-  // recovers both without touching every spawn call site. Sessions spawned
-  // before either existed simply have no identity.
-  const spawnIdentity = {
-    ...(args.rootCreationTimeMs !== undefined
-      ? { rootCreationTimeMs: args.rootCreationTimeMs }
-      : {}),
-    ...(args.env[ORCA_PTY_TREE_ID_ENV] ? { ptyTreeId: args.env[ORCA_PTY_TREE_ID_ENV] } : {})
-  }
+  // Why recovered here, not plumbed as an arg: the spawn env already carries
+  // the marker, so the handle recovers it without touching every spawn call
+  // site. The spawn creation time is set separately (see createPtySubprocess).
+  const treeId = args.env[ORCA_PTY_TREE_ID_ENV]
+  const spawnIdentity = treeId ? { ptyTreeId: treeId } : {}
   return {
     pid: proc.pid,
     shellPath: args.shellPath,

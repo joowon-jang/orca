@@ -1,8 +1,5 @@
 import { execFile } from 'node:child_process'
-import {
-  runWindowsSweepWithDeadline,
-  type WindowsSweepDeps
-} from './pty-descendant-sweep-budget'
+import { runWindowsSweepWithDeadline, type WindowsSweepDeps } from './pty-descendant-sweep-budget'
 
 export const DESCENDANT_KILL_GRACE_MS = 2_000
 export const DESCENDANT_SNAPSHOT_TIMEOUT_MS = 1_000
