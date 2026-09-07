@@ -181,7 +181,8 @@ describe('EmulatorBridge helper ownership', () => {
     )
     expect(killServeSimHelperProcessesForDeviceMock).toHaveBeenCalledTimes(1)
     expect(killServeSimHelperProcessesForDeviceMock).toHaveBeenCalledWith('device-managed', {
-      helperPid: 1234
+      helperPid: 1234,
+      includeOrphaned: true
     })
     expect(shutdownSimulatorDeviceMock).toHaveBeenCalledWith('device-managed')
     expect(bridge.getActiveForWorktree('wt-managed')).toBeNull()
