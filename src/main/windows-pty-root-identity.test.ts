@@ -41,8 +41,7 @@ describe('classifyWindowsTreeKillTarget', () => {
 
   it('documents that a recycled PID under another Orca pane still classifies as own', () => {
     // Dead PTY root 4242 recycled as a tool under a different pane's agent tree.
-    // Ancestry still reaches us, so taskkill is allowed — wrong process, own tree.
-    // Closing this needs spawn-time CreationDate / Job Object (#10680).
+    // Ancestry reaches us, but the verifier must also demand a native spawn baseline.
     const rows = [link(ORCA_PID, 900), link(7000, ORCA_PID), link(7100, 7000), link(4242, 7100)]
     expect(classifyWindowsTreeKillTarget(4242, rows, ORCA_PID)).toBe('own')
   })
@@ -97,51 +96,79 @@ describe('classifyWindowsTreeKillTarget', () => {
 
 describe('verifyWindowsTreeKillTarget', () => {
   it('classifies a live win32 root against the fresh process table', async () => {
-    const readRows = vi.fn().mockResolvedValue([link(4242, ORCA_PID)])
+    const readIdentityRows = vi
+      .fn()
+      .mockResolvedValue([{ ...link(4242, ORCA_PID), creationTimeMs: 1234 }])
     await expect(
-      verifyWindowsTreeKillTarget(4242, { readRows, ownerPid: ORCA_PID, platform: 'win32' })
+      verifyWindowsTreeKillTarget(4242, {
+        readIdentityRows,
+        ownerPid: ORCA_PID,
+        platform: 'win32',
+        expectedCreationTimeMs: 1234
+      })
     ).resolves.toBe('own')
-    expect(readRows).toHaveBeenCalledOnce()
+    expect(readIdentityRows).toHaveBeenCalledOnce()
   })
 
   it('detects the recycled-pid case that taskkill /T /F must not touch', async () => {
-    const readRows = vi.fn().mockResolvedValue([link(4242, 900), link(900, 4)])
+    const readIdentityRows = vi.fn().mockResolvedValue([link(4242, 900), link(900, 4)])
     await expect(
-      verifyWindowsTreeKillTarget(4242, { readRows, ownerPid: ORCA_PID, platform: 'win32' })
+      verifyWindowsTreeKillTarget(4242, {
+        readIdentityRows,
+        ownerPid: ORCA_PID,
+        platform: 'win32',
+        expectedCreationTimeMs: 1234
+      })
     ).resolves.toBe('foreign')
   })
 
   it('returns unknown when the Windows process table is unavailable', async () => {
-    const readRows = vi.fn().mockResolvedValue(null)
+    const readIdentityRows = vi.fn().mockResolvedValue(null)
     await expect(
-      verifyWindowsTreeKillTarget(4242, { readRows, ownerPid: ORCA_PID, platform: 'win32' })
+      verifyWindowsTreeKillTarget(4242, {
+        readIdentityRows,
+        ownerPid: ORCA_PID,
+        platform: 'win32',
+        expectedCreationTimeMs: 1234
+      })
     ).resolves.toBe('unknown')
   })
 
   it('returns unknown when the process query rejects', async () => {
-    const readRows = vi.fn().mockRejectedValue(new Error('process table unavailable'))
+    const readIdentityRows = vi.fn().mockRejectedValue(new Error('process table unavailable'))
     await expect(
-      verifyWindowsTreeKillTarget(4242, { readRows, ownerPid: ORCA_PID, platform: 'win32' })
+      verifyWindowsTreeKillTarget(4242, {
+        readIdentityRows,
+        ownerPid: ORCA_PID,
+        platform: 'win32',
+        expectedCreationTimeMs: 1234
+      })
     ).resolves.toBe('unknown')
   })
 
   it('returns unknown when the query throws synchronously', async () => {
-    const readRows = vi.fn(() => {
+    const readIdentityRows = vi.fn(() => {
       throw new Error('spawn EPERM')
     })
     await expect(
-      verifyWindowsTreeKillTarget(4242, { readRows, ownerPid: ORCA_PID, platform: 'win32' })
+      verifyWindowsTreeKillTarget(4242, {
+        readIdentityRows,
+        ownerPid: ORCA_PID,
+        platform: 'win32',
+        expectedCreationTimeMs: 1234
+      })
     ).resolves.toBe('unknown')
   })
 
   it('does not let a wedged process query block teardown past the deadline', async () => {
     vi.useFakeTimers()
     try {
-      const readRows = vi.fn(() => new Promise<never>(() => {}))
+      const readIdentityRows = vi.fn(() => new Promise<never>(() => {}))
       const pending = verifyWindowsTreeKillTarget(4242, {
-        readRows,
+        readIdentityRows,
         ownerPid: ORCA_PID,
-        platform: 'win32'
+        platform: 'win32',
+        expectedCreationTimeMs: 1234
       })
       await vi.advanceTimersByTimeAsync(WINDOWS_ROOT_IDENTITY_TIMEOUT_MS)
       await expect(pending).resolves.toBe('unknown')
@@ -151,11 +178,15 @@ describe('verifyWindowsTreeKillTarget', () => {
   })
 
   it('skips the probe off Windows so POSIX teardown keeps its own guards', async () => {
-    const readRows = vi.fn()
+    const readIdentityRows = vi.fn()
     await expect(
-      verifyWindowsTreeKillTarget(4242, { readRows, ownerPid: ORCA_PID, platform: 'darwin' })
+      verifyWindowsTreeKillTarget(4242, {
+        readIdentityRows,
+        ownerPid: ORCA_PID,
+        platform: 'darwin'
+      })
     ).resolves.toBe('unknown')
-    expect(readRows).not.toHaveBeenCalled()
+    expect(readIdentityRows).not.toHaveBeenCalled()
   })
 })
 
@@ -223,20 +254,21 @@ describe('verifyWindowsTreeKillTarget with a spawn-anchored creation time', () =
     ).resolves.toBe('unknown')
   })
 
-  it('keeps the link-reader path untouched when no baseline is set', async () => {
-    const readRows = vi.fn().mockResolvedValue([link(4242, ORCA_PID)])
-    const readIdentityRows = vi.fn()
-    await expect(
-      verifyWindowsTreeKillTarget(4242, {
-        readRows,
-        readIdentityRows,
-        ownerPid: ORCA_PID,
-        platform: 'win32'
-      })
-    ).resolves.toBe('own')
-    expect(readRows).toHaveBeenCalledOnce()
-    expect(readIdentityRows).not.toHaveBeenCalled()
-  })
+  it.each([undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+    'refuses PID-addressed teardown without a valid spawn baseline (%p)',
+    async (expectedCreationTimeMs) => {
+      const readIdentityRows = vi.fn().mockResolvedValue([identityRow(4242, ORCA_PID, SPAWNED_AT)])
+      await expect(
+        verifyWindowsTreeKillTarget(4242, {
+          readIdentityRows,
+          ownerPid: ORCA_PID,
+          platform: 'win32',
+          expectedCreationTimeMs
+        })
+      ).resolves.toBe('unknown')
+      expect(readIdentityRows).not.toHaveBeenCalled()
+    }
+  )
 })
 
 // Regression guard on the DEFAULT reader, which the cases above bypass by
@@ -246,7 +278,7 @@ describe('verifyWindowsTreeKillTarget with a spawn-anchored creation time', () =
 describe('verifyWindowsTreeKillTarget scan volume', () => {
   const NATIVE_ROWS = [
     { pid: ORCA_PID, ppid: 900, name: 'orca.exe', commandLine: 'orca.exe' },
-    { pid: 4242, ppid: ORCA_PID, name: 'pwsh.exe', commandLine: 'pwsh.exe' }
+    { pid: 4242, ppid: ORCA_PID, name: 'pwsh.exe', commandLine: 'pwsh.exe', creationTimeMs: 1234 }
   ]
 
   beforeEach(() => {
@@ -267,7 +299,11 @@ describe('verifyWindowsTreeKillTarget scan volume', () => {
   it('collapses a 32-wide teardown burst into a single process-table scan', async () => {
     const verdicts = await Promise.all(
       Array.from({ length: 32 }, () =>
-        verifyWindowsTreeKillTarget(4242, { ownerPid: ORCA_PID, platform: 'win32' })
+        verifyWindowsTreeKillTarget(4242, {
+          ownerPid: ORCA_PID,
+          platform: 'win32',
+          expectedCreationTimeMs: 1234
+        })
       )
     )
 

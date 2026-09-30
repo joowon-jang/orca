@@ -102,9 +102,7 @@ export async function createPtySubprocess(opts: PtySubprocessOptions): Promise<S
     throw error
   }
 
-  // Why handle first, identity after: the handle registers proc.onExit
-  // synchronously, and node-pty does not replay exit to late listeners. Awaiting
-  // the table read first would miss a fast exit and leave the session live.
+  // Register exit listeners before reading identity; node-pty does not replay early exits.
   const handle = createDaemonPtySubprocessHandle({
     process: spawned.process,
     shellPath: spawned.shellPath,
@@ -117,9 +115,8 @@ export async function createPtySubprocess(opts: PtySubprocessOptions): Promise<S
     sessionId: opts.sessionId,
     startupAgentRecognition: launch.startupAgentRecognition
   })
-  // Why after spawn, not at sweep: only a value captured while this PID is
-  // necessarily the just-spawned root can anchor the tree-kill probe (#10680).
-  const rootCreationTimeMs = await captureSpawnedRootCreationTimeMs(spawned.process.pid)
+  // The native shell handle anchors identity without waiting for a process-table scan.
+  const rootCreationTimeMs = captureSpawnedRootCreationTimeMs(spawned.process)
   if (rootCreationTimeMs !== undefined) {
     handle.spawnIdentity = { ...handle.spawnIdentity, rootCreationTimeMs }
   }

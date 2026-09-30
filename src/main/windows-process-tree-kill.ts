@@ -1,7 +1,10 @@
 import { execFile } from 'node:child_process'
 import { admitSelfInitiatedTreeKill } from './own-chromium-tree-kill-guard'
 
-export type WindowsTreeKiller = (rootPid: number, deps?: { site?: string }) => Promise<void>
+export type WindowsTreeKiller = (
+  rootPid: number,
+  deps?: { site?: string; signal?: AbortSignal }
+) => Promise<void>
 
 /** Bound hung taskkill so killRoot still runs in killWithDescendantSweep. */
 export const WINDOWS_PROCESS_TREE_KILL_TIMEOUT_MS = 5_000
@@ -18,9 +21,14 @@ export const WINDOWS_PROCESS_TREE_KILL_TIMEOUT_MS = 5_000
  */
 export function terminateWindowsProcessTree(
   rootPid: number,
-  deps: { execFileImpl?: typeof execFile; timeoutMs?: number; site?: string } = {}
+  deps: {
+    execFileImpl?: typeof execFile
+    timeoutMs?: number
+    site?: string
+    signal?: AbortSignal
+  } = {}
 ): Promise<void> {
-  if (!Number.isInteger(rootPid) || rootPid <= 0) {
+  if (deps.signal?.aborted || !Number.isInteger(rootPid) || rootPid <= 0) {
     return Promise.resolve()
   }
   const site = deps.site ?? 'windows-process-tree-kill'
@@ -35,7 +43,8 @@ export function terminateWindowsProcessTree(
       {
         // Why: a wedged taskkill must not block killRoot forever (#10004 review).
         timeout: deps.timeoutMs ?? WINDOWS_PROCESS_TREE_KILL_TIMEOUT_MS,
-        windowsHide: true
+        windowsHide: true,
+        ...(deps.signal ? { signal: deps.signal } : {})
       },
       () => {
         resolve()

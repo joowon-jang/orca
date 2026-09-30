@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import {
   ORCHESTRATION_COMPATIBILITY_ATTACHMENT_ENV,
   ORCHESTRATION_COMPATIBILITY_HOST_ID_ENV,
@@ -21,17 +22,13 @@ const WSLENV_ENTRY_SEPARATOR = ':'
 export const ORCA_PTY_TREE_ID_ENV = 'ORCA_PTY_TREE_ID'
 
 /**
- * Whether a tree marker survives the guest-side fixed-string match. Control
- * characters would split the environ line the killer greps for, so they
- * disqualify the marker and callers degrade to Windows-side cleanup alone.
+ * Whether a tree marker is safe to pass across the WSL command boundary.
  */
 export function isUsablePtyTreeMarker(value: string | undefined): value is string {
   if (!value || value.length === 0 || value.length > 512) {
     return false
   }
-  // Why includes, not a character-class regex: control characters are
-  // exactly what no-control-regex forbids matching, and only these three
-  // can split the environ line the guest killer greps for.
+  // Reject delimiters without a no-control-regex exception.
   return !value.includes('\0') && !value.includes('\n') && !value.includes('\r')
 }
 
@@ -44,10 +41,12 @@ export function stampPtyTreeIdMarker(
   env: Record<string, string>,
   sessionId: string | undefined
 ): boolean {
+  delete env[ORCA_PTY_TREE_ID_ENV]
   if (!isUsablePtyTreeMarker(sessionId)) {
     return false
   }
-  env[ORCA_PTY_TREE_ID_ENV] = sessionId
+  // A reused session id must never let an old cleanup target a newer spawn.
+  env[ORCA_PTY_TREE_ID_ENV] = randomUUID()
   return true
 }
 

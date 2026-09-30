@@ -59,7 +59,7 @@ describe('main shutdown lifecycle compatibility', () => {
   })
 
   it.each([false, true])(
-    'reevaluates Windows immediate=%s after the identity probe',
+    'retains the Windows root after immediate becomes %s during the probe',
     async (immediateAfterProbe) => {
       const probeGate = deferred<WindowsTreeKillTarget>()
       const killGate = deferred<void>()
@@ -77,8 +77,8 @@ describe('main shutdown lifecycle compatibility', () => {
       immediate = immediateAfterProbe
       probeGate.resolve('own')
       await vi.advanceTimersByTimeAsync(0)
-      expect(killRoot).toHaveBeenCalledOnce()
-      expect(settled).toBe(!immediateAfterProbe)
+      expect(killRoot).not.toHaveBeenCalled()
+      expect(settled).toBe(false)
       killGate.resolve()
       await pending
     }

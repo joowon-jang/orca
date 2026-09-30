@@ -1,13 +1,12 @@
-import { queryWindowsProcessLinksFresh } from './providers/windows-foreground-process-rows'
 import { readOrcaChromiumProcessPids } from './orca-chromium-process-pids'
-import { readWindowsProcessTableFresh } from './windows/windows-process-table'
+import { readWindowsProcessIdentityTableFresh } from './windows/windows-process-table'
 
 /**
  * Whether a PID still sits inside this process's own subtree. Note this is
  * subtree membership, not root identity: a recycled PID that lands on any other
  * Orca descendant also reads `own`. It bounds the blast radius of a bad
  * `taskkill /T /F` to our own tree; it does not prove we spawned this PTY.
- * - `own`: ancestry reaches us, so the tree is eligible for guarded teardown.
+ * - `own`: ancestry reaches us; teardown additionally requires a spawn baseline.
  * - `absent`: the PID is gone; `taskkill` would no-op anyway.
  * - `foreign`: the PID resolves to a process we did not start (PID recycle).
  * - `unknown`: no usable evidence; callers must not force-kill the tree.
@@ -21,8 +20,6 @@ export const WINDOWS_ROOT_IDENTITY_TIMEOUT_MS = 3_000
 const MAX_ANCESTOR_HOPS = 4
 
 type ProcessLink = { pid: number; ppid: number }
-
-export type WindowsProcessLinkReader = () => Promise<readonly ProcessLink[] | null>
 
 /** Identity row: ancestry links plus the spawn-anchored creation time. */
 export type WindowsIdentityRow = {
@@ -133,7 +130,7 @@ function readLinksBeforeDeadline<T>(
 /** Fresh native rows with creation times; null when the table is unreadable. */
 async function readIdentityRowsFresh(): Promise<readonly WindowsIdentityRow[] | null> {
   try {
-    const rows = await readWindowsProcessTableFresh()
+    const rows = await readWindowsProcessIdentityTableFresh()
     return rows.map((row) => ({
       pid: row.pid,
       ppid: row.ppid,
@@ -153,15 +150,14 @@ async function readIdentityRowsFresh(): Promise<readonly WindowsIdentityRow[] | 
 export async function verifyWindowsTreeKillTarget(
   rootPid: number,
   deps: {
-    readRows?: WindowsProcessLinkReader
     readIdentityRows?: WindowsIdentityRowReader
     ownerPid?: number
     ownChromiumPids?: ReadonlySet<number>
     platform?: NodeJS.Platform
     timeoutMs?: number
     /**
-     * Creation time captured at spawn. When set, an `own` ancestry verdict
-     * additionally requires the root row's creation time to match — a
+     * Creation time captured from the spawn handle. Required for an `own`
+     * verdict: the root row's creation time must match, otherwise a
      * recycled PID landing on another Orca descendant resolves `foreign`
      * instead (#10680). A root row without a creation time resolves
      * `unknown`: with a baseline set, a missing value cannot prove this PID
@@ -176,20 +172,12 @@ export async function verifyWindowsTreeKillTarget(
     return 'unknown'
   }
   const timeoutMs = deps.timeoutMs ?? WINDOWS_ROOT_IDENTITY_TIMEOUT_MS
-  if (deps.expectedCreationTimeMs === undefined) {
-    const rows = await readLinksBeforeDeadline(
-      deps.readRows ?? queryWindowsProcessLinksFresh,
-      timeoutMs
-    )
-    if (!rows) {
-      return 'unknown'
-    }
-    return classifyWindowsTreeKillTarget(
-      rootPid,
-      rows,
-      deps.ownerPid ?? process.pid,
-      deps.ownChromiumPids ?? readOrcaChromiumProcessPids()
-    )
+  // Ancestry cannot distinguish a recycled PID belonging to another Orca pane.
+  if (
+    !Number.isSafeInteger(deps.expectedCreationTimeMs) ||
+    (deps.expectedCreationTimeMs ?? 0) <= 0
+  ) {
+    return 'unknown'
   }
   const rows = await readLinksBeforeDeadline(
     deps.readIdentityRows ?? readIdentityRowsFresh,

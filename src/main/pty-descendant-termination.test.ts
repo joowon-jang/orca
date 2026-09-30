@@ -607,7 +607,10 @@ describe('killWithDescendantSweep', () => {
       verifyTreeKillTarget: async () => 'own'
     })
 
-    expect(killWindowsTree).toHaveBeenCalledWith(4242)
+    expect(killWindowsTree).toHaveBeenCalledWith(
+      4242,
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
     expect(killRoot).toHaveBeenCalledOnce()
   })
 
@@ -628,94 +631,55 @@ describe('killWithDescendantSweep', () => {
       // real Windows host where the default probe would query this fake pid.
       verifyTreeKillTarget: async () => 'own'
     })
-    expect(killWindowsTree).toHaveBeenCalledWith(4242)
+    expect(killWindowsTree).toHaveBeenCalledWith(
+      4242,
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
     expect(killRoot).toHaveBeenCalledOnce()
     expect(sendSignal).not.toHaveBeenCalled()
     expect(readTable).not.toHaveBeenCalled()
-    // This mock resolves synchronously (no internal await), so tree-kill still
-    // lands first here; killRoot no longer *waits* on it, see the shutdown-budget
-    // regressions below for that.
+    // Preserve the root until the tree walk has completed.
     expect(events).toEqual(['tree-kill', 'root-kill'])
   })
 
-  // Regression (Codex P2): killRoot used to sit behind `await killTree(...)` in
-  // a `finally`, so a wedged/slow taskkill (bounded only by its own
-  // WINDOWS_PROCESS_TREE_KILL_TIMEOUT_MS = 5s) stacked on top of the identity
-  // probe's WINDOWS_ROOT_IDENTITY_TIMEOUT_MS = 3s could push the native root
-  // force-kill past a caller's shutdown budget (the daemon's 5s
-  // SHUTDOWN_TIMEOUT_MS) and skip it entirely if the outer deadline won the race.
-  it('on Windows, kills the root without waiting for a slow taskkill to resolve (shutdown-budget regression)', async () => {
-    const events: string[] = []
-    const killTreeGate = deferred<void>()
-    const killWindowsTree = vi.fn(() => {
-      events.push('tree-kill-started')
-      return killTreeGate.promise
-    })
-    const killRoot = vi.fn(() => events.push('root-kill'))
+  it.each([false, true])(
+    'on Windows retains the root during taskkill with awaitEscalation=%s',
+    async (awaitEscalation) => {
+      const gate = deferred<void>()
+      const events: string[] = []
+      const killRoot = vi.fn(() => events.push('root-kill'))
+      const pending = killWithDescendantSweep(4242, killRoot, {
+        platform: 'win32',
+        awaitEscalation,
+        killWindowsTree: () => {
+          events.push('tree-kill-started')
+          return gate.promise
+        },
+        verifyTreeKillTarget: async () => 'own'
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(events).toEqual(['tree-kill-started'])
+      gate.resolve()
+      await pending
+      expect(events).toEqual(['tree-kill-started', 'root-kill'])
+      expect(killRoot).toHaveBeenCalledOnce()
+    }
+  )
 
-    await killWithDescendantSweep(4242, killRoot, {
-      platform: 'win32',
-      killWindowsTree,
-      verifyTreeKillTarget: async () => 'own'
-    })
-
-    expect(events).toEqual(['tree-kill-started', 'root-kill'])
-    expect(killRoot).toHaveBeenCalledOnce()
-
-    killTreeGate.resolve()
-  })
-
-  it('on Windows with awaitEscalation, still kills the root immediately but does not resolve until taskkill settles', async () => {
-    const killTreeGate = deferred<void>()
-    const killWindowsTree = vi.fn(() => killTreeGate.promise)
+  it('bounds a wedged Windows tree walk before releasing the root', async () => {
     const killRoot = vi.fn()
-
     const pending = killWithDescendantSweep(4242, killRoot, {
       platform: 'win32',
-      killWindowsTree,
-      verifyTreeKillTarget: async () => 'own',
-      awaitEscalation: true
-    })
-    let settled = false
-    void pending.then(() => {
-      settled = true
-    })
-
-    await vi.advanceTimersByTimeAsync(0)
-    expect(killRoot).toHaveBeenCalledOnce()
-    expect(settled).toBe(false)
-
-    killTreeGate.resolve()
-    await pending
-    expect(settled).toBe(true)
-  })
-
-  // WSL sessions run their guest process tree inside the WSL2 VM, which is
-  // never a member of the wsl.exe root's Windows job object — so
-  // terminateOwnedTree always reports `unavailable` for them and they take the
-  // same identity-probe + taskkill fallback as a job-less native Windows pty.
-  it('on Windows (WSL fallback: no job covers the guest tree), kills the root without waiting for taskkill', async () => {
-    const events: string[] = []
-    const terminateOwnedTree = vi.fn(() => 'unavailable' as const)
-    const killTreeGate = deferred<void>()
-    const killWindowsTree = vi.fn(() => {
-      events.push('tree-kill-started')
-      return killTreeGate.promise
-    })
-    const killRoot = vi.fn(() => events.push('root-kill'))
-
-    await killWithDescendantSweep(4242, killRoot, {
-      platform: 'win32',
-      terminateOwnedTree,
-      killWindowsTree,
+      sweepTimeoutMs: 100,
+      terminateOwnedTree: () => 'unavailable',
+      killWindowsTree: () => new Promise<void>(() => {}),
       verifyTreeKillTarget: async () => 'own'
     })
-
-    expect(terminateOwnedTree).toHaveBeenCalledOnce()
-    expect(events).toEqual(['tree-kill-started', 'root-kill'])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(killRoot).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(100)
+    await pending
     expect(killRoot).toHaveBeenCalledOnce()
-
-    killTreeGate.resolve()
   })
 
   it('on Windows still kills the root when ownership is lost mid-sweep', async () => {
@@ -764,7 +728,10 @@ describe('killWithDescendantSweep', () => {
       killWindowsTree,
       verifyTreeKillTarget: async () => 'own'
     })
-    expect(killWindowsTree).toHaveBeenCalledWith(4242)
+    expect(killWindowsTree).toHaveBeenCalledWith(
+      4242,
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
     expect(killRoot).toHaveBeenCalledOnce()
   })
 

@@ -10,6 +10,9 @@ import {
   type WindowsTreeKillTarget
 } from './windows-pty-root-identity'
 
+// Leave room before the session's independent 5s forced-root deadline.
+const DEFAULT_WINDOWS_SWEEP_TIMEOUT_MS = 4_000
+
 /**
  * Bounded Windows side of the descendant sweep.
  *
@@ -37,13 +40,13 @@ export type WindowsSweepDeps = {
   /**
    * Spawn-captured creation time of the root. Anchors the identity probe so
    * a recycled PID on another Orca descendant resolves `foreign` instead of
-   * `own` (#10680). Unset keeps the ancestry walk.
+   * `own` (#10680). Unset refuses PID-addressed fallback.
    */
   expectedRootCreationTimeMs?: number
   /**
    * Hard bound on the Windows sweep. killRoot still fires by this deadline;
-   * only this function's own settlement waits out the escalation. Unset
-   * keeps the legacy behavior (inner operations bound themselves).
+   * the root stays alive for taskkill discovery until then. Unset uses the
+   * 4s budget shared with the daemon shutdown path.
    */
   sweepTimeoutMs?: number
 }
@@ -92,26 +95,25 @@ function settleEscalationWithin(
  *
  * Why the deadline fires killRoot itself instead of trusting the inner
  * bounds: an injected killer can hang forever and a wedged probe can eat
- * the whole daemon budget, either of which used to skip killRoot entirely
- * when the outer shutdown race gave up first. The load-bearing kill cannot
- * be starved by the escalation it precedes.
+ * the whole daemon budget. Expiration also retires late probe results so
+ * they cannot start a PID-addressed kill after the root handle closes.
  */
 export async function runWindowsSweepWithDeadline(
   rootPid: number,
   killRoot: () => void,
   deps: WindowsSweepDeps
 ): Promise<void> {
-  if (deps.sweepTimeoutMs == null) {
-    await runWindowsSweep(rootPid, killRoot, deps)
-    return
-  }
-  const total = Math.max(0, Math.floor(deps.sweepTimeoutMs))
+  const total = Math.max(0, Math.floor(deps.sweepTimeoutMs ?? DEFAULT_WINDOWS_SWEEP_TIMEOUT_MS))
+  const deadline = performance.now() + total
+  const controller = new AbortController()
   let rootFired = false
   const fireRootOnce = (): void => {
     if (rootFired) {
       return
     }
     rootFired = true
+    // Stop outstanding taskkill discovery before releasing the root handle.
+    controller.abort()
     try {
       killRoot()
     } catch {
@@ -119,10 +121,6 @@ export async function runWindowsSweepWithDeadline(
       // or will run it in its own finally.
     }
   }
-  const run = runWindowsSweep(rootPid, fireRootOnce, deps).then(
-    () => {},
-    () => fireRootOnce()
-  )
   await new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
       fireRootOnce()
@@ -131,6 +129,13 @@ export async function runWindowsSweepWithDeadline(
     if (!shouldAwaitEscalation(deps)) {
       timer.unref?.()
     }
+    const run = runWindowsSweep(
+      rootPid,
+      fireRootOnce,
+      { ...deps, sweepTimeoutMs: total },
+      controller.signal,
+      () => !rootFired && performance.now() < deadline
+    ).catch(() => fireRootOnce())
     void run.then(() => {
       clearTimeout(timer)
       resolve()
@@ -141,21 +146,18 @@ export async function runWindowsSweepWithDeadline(
 async function runWindowsSweep(
   rootPid: number,
   killRoot: () => void,
-  deps: WindowsSweepDeps
+  deps: WindowsSweepDeps & { sweepTimeoutMs: number },
+  signal: AbortSignal,
+  isActive: () => boolean
 ): Promise<void> {
-  // Why scaled from the sweep budget instead of always the full probe
-  // timeout: the probe plus the tree kill used to stack past the daemon's
-  // shutdown budget on their own. Unset keeps the legacy full bounds.
-  const budgets = deps.sweepTimeoutMs == null ? undefined : splitSweepBudget(deps.sweepTimeoutMs)
-  const verifyMs = budgets
-    ? Math.max(1, Math.min(WINDOWS_ROOT_IDENTITY_TIMEOUT_MS, budgets.preKillMs))
-    : WINDOWS_ROOT_IDENTITY_TIMEOUT_MS
-  const treeKillMs = budgets
-    ? Math.max(1, Math.min(WINDOWS_PROCESS_TREE_KILL_TIMEOUT_MS, budgets.escalationMs))
-    : WINDOWS_PROCESS_TREE_KILL_TIMEOUT_MS
-  let treeKillEscalation: Promise<void> = Promise.resolve()
+  const budgets = splitSweepBudget(deps.sweepTimeoutMs)
+  const verifyMs = Math.max(1, Math.min(WINDOWS_ROOT_IDENTITY_TIMEOUT_MS, budgets.preKillMs))
+  const treeKillMs = Math.max(
+    1,
+    Math.min(WINDOWS_PROCESS_TREE_KILL_TIMEOUT_MS, budgets.escalationMs)
+  )
   try {
-    if ((deps.ownsRoot?.() ?? true) && Number.isInteger(rootPid) && rootPid > 0) {
+    if (isActive() && (deps.ownsRoot?.() ?? true) && Number.isInteger(rootPid) && rootPid > 0) {
       // Why first: the job names the tree Orca created, so it is immune to the
       // pid recycling the probe below exists to guard against, and it reaches
       // descendants that reparented away from the shell.
@@ -179,29 +181,24 @@ async function runWindowsSweep(
           }))
       const target = await verify(rootPid).catch((): WindowsTreeKillTarget => 'unknown')
       // Re-check ownership: the identity query awaits, so exit can land meanwhile.
-      if (target === 'own' && (deps.ownsRoot?.() ?? true)) {
+      if (isActive() && target === 'own' && (deps.ownsRoot?.() ?? true)) {
         const killTree =
           deps.killWindowsTree ??
           ((pid: number) =>
             terminateWindowsProcessTree(pid, {
               timeoutMs: treeKillMs,
-              site: 'pty-descendant-sweep'
+              site: 'pty-descendant-sweep',
+              signal
             }))
-        // Why not awaited here: taskkill's own timeout stacked behind the
-        // identity probe above can exceed the daemon's shutdown budget, which
-        // let killRoot get skipped entirely when the outer shutdown race gave
-        // up first. Run it as a bounded escalation instead, mirroring the
-        // POSIX SIGKILL sweep, so killRoot always fires on schedule and
-        // this only delays an opt-in await.
-        treeKillEscalation = killTree(rootPid).catch(() => {})
+        // taskkill discovers descendants asynchronously; retain the root until it finishes.
+        await settleEscalationWithin(
+          killTree(rootPid, { signal }).catch(() => {}),
+          treeKillMs,
+          shouldAwaitEscalation(deps)
+        )
       }
     }
   } finally {
     killRoot()
-  }
-  if (shouldAwaitEscalation(deps)) {
-    await (budgets
-      ? settleEscalationWithin(treeKillEscalation, budgets.escalationMs, true)
-      : treeKillEscalation)
   }
 }

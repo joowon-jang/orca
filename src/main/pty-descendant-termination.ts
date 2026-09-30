@@ -1,5 +1,10 @@
 import { execFile } from 'node:child_process'
 import { matchingSignalTargets } from './pty-descendant-signal-targets'
+import {
+  readProcessTableBeforeDeadline,
+  readProcessTableWithRetries
+} from './pty-process-table-deadline'
+export { readProcessTableBeforeDeadline } from './pty-process-table-deadline'
 import { parseProcessTable, type ProcessTableRow } from './pty-process-table-parser'
 
 export { parseProcessTable, type ProcessTableRow } from './pty-process-table-parser'
@@ -109,40 +114,6 @@ export function createProcessTableSnapshotReader(
 }
 
 export const readProcessTable = createProcessTableSnapshotReader(readFreshProcessTable)
-
-export function readProcessTableBeforeDeadline(
-  readTable: ProcessTableReader,
-  timeoutMs: number,
-  /** Keep this deadline timer ref'd instead of the default unref'd. Only a
-   *  caller that awaits the full escalation (daemon shutdown) should set
-   *  this — otherwise Node's event loop can see no ref'd work left and let
-   *  the process exit before the deadline this promise depends on fires. */
-  keepAlive = false
-): Promise<ProcessTableCapture | null> {
-  return new Promise((resolve) => {
-    let settled = false
-    const finish = (capture: ProcessTableCapture | null): void => {
-      if (settled) {
-        return
-      }
-      settled = true
-      clearTimeout(timer)
-      resolve(capture)
-    }
-    const timer = setTimeout(() => finish(null), timeoutMs)
-    if (!keepAlive) {
-      timer.unref?.()
-    }
-    try {
-      void readTable(timeoutMs).then(
-        (rows) => finish(rows),
-        () => finish(null)
-      )
-    } catch {
-      finish(null)
-    }
-  })
-}
 
 export function collectDescendantRows(
   rootPid: number,
@@ -305,7 +276,7 @@ export type TerminateDeps = {
   readTable?: ProcessTableReader
   sendSignal?: SignalSender
   graceMs?: number
-  /** Shared budget for the pre-SIGTERM and pre-SIGKILL identity reads. */
+  /** Independent budget for each signal phase, including transient-read retries. */
   timeoutMs?: number
   /**
    * On POSIX (consumed directly by terminateDescendantSnapshot): await the
@@ -324,8 +295,8 @@ export type TerminateDeps = {
    * unset so an otherwise-idle long-lived process isn't held open by it.
    *
    * On Windows (consumed by killWithDescendantSweep via this same field):
-   * await the `taskkill /T /F` escalation kicked off after the identity
-   * probe, for the same reason — killRoot itself never waits on it either way.
+   * keep deadline timers alive while awaiting bounded tree termination. The
+   * Windows root remains alive until that termination completes or times out.
    */
   awaitEscalation?: boolean
 }
@@ -354,9 +325,8 @@ async function startDescendantTermination(
   const keepAlive = deps.awaitEscalation ?? false
   const timeoutMs = deps.timeoutMs ?? DESCENDANT_SNAPSHOT_TIMEOUT_MS
   const graceMs = deps.graceMs ?? DESCENDANT_KILL_GRACE_MS
-  // Share the old read budget so revalidation cannot consume daemon shutdown's headroom.
-  const deadline = performance.now() + timeoutMs + graceMs
-  const initial = await readProcessTableBeforeDeadline(readTable, timeoutMs, keepAlive)
+  // Daemon shutdown supplies its own verifier; interactive escalation gets a full fresh-read budget.
+  const initial = await readProcessTableWithRetries(readTable, timeoutMs, keepAlive, ownsRoot)
   if (!initial || !(ownsRoot?.() ?? true)) {
     return skip
   }
@@ -370,12 +340,7 @@ async function startDescendantTermination(
   const validatedSnapshot = { ...snapshot, descendants }
   const escalation = new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
-      const remainingMs = Math.floor(deadline - performance.now())
-      if (remainingMs <= 0) {
-        resolve()
-        return
-      }
-      void readProcessTableBeforeDeadline(readTable, remainingMs, keepAlive).then((capture) => {
+      void readProcessTableWithRetries(readTable, timeoutMs, keepAlive).then((capture) => {
         if (capture) {
           for (const row of matchingSignalTargets(validatedSnapshot, capture.rows)) {
             sendSignal(row.pid, 'SIGKILL')

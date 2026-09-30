@@ -177,7 +177,9 @@ describe('descendant identity revalidation', () => {
         return Promise.reject(new Error('unreadable'))
       })
       const sendSignal = vi.fn()
-      await terminateDescendantSnapshot(snapshot(), { readTable, sendSignal })
+      const pending = terminateDescendantSnapshot(snapshot(), { readTable, sendSignal })
+      await vi.advanceTimersByTimeAsync(1_000)
+      await pending
       expect(sendSignal).not.toHaveBeenCalled()
       expect(vi.getTimerCount()).toBe(0)
     }
@@ -220,10 +222,10 @@ describe('descendant identity revalidation', () => {
         sendSignal,
         graceMs: 100
       })
-      await vi.advanceTimersByTimeAsync(100)
+      await vi.advanceTimersByTimeAsync(1_100)
       await pending
       expect(sendSignal.mock.calls).toEqual([[20, 'SIGTERM']])
-      expect(readTable).toHaveBeenCalledTimes(2)
+      expect(readTable.mock.calls.length).toBeGreaterThan(2)
       expect(vi.getTimerCount()).toBe(0)
     }
   )
@@ -312,7 +314,7 @@ describe('SIGTERM sequencing and shutdown budget', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('shares 1000ms between a slow initial read and a wedged escalation read', async () => {
+  it('reserves a full escalation read budget after a slow initial read', async () => {
     const gate = deferred<ProcessTableCapture>()
     const late = deferred<ProcessTableCapture>()
     const readTable = vi.fn().mockReturnValueOnce(gate.promise).mockReturnValue(late.promise)
@@ -330,8 +332,8 @@ describe('SIGTERM sequencing and shutdown budget', () => {
     await vi.advanceTimersByTimeAsync(800)
     gate.resolve(capture())
     await vi.advanceTimersByTimeAsync(2_000)
-    expect(readTable.mock.calls).toEqual([[1_000], [200]])
-    await vi.advanceTimersByTimeAsync(199)
+    expect(readTable.mock.calls).toEqual([[1_000], [1_000]])
+    await vi.advanceTimersByTimeAsync(999)
     expect(settled).toBe(false)
     await vi.advanceTimersByTimeAsync(1)
     await pending
@@ -341,23 +343,7 @@ describe('SIGTERM sequencing and shutdown budget', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('does not start an escalation read after the monotonic budget is exhausted', async () => {
-    const now = vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValue(3_001)
-    const readTable = vi.fn().mockResolvedValue(capture())
-    const sendSignal = vi.fn()
-    try {
-      const pending = terminateDescendantSnapshot(snapshot(), { readTable, sendSignal })
-      await vi.advanceTimersByTimeAsync(2_000)
-      await pending
-      expect(readTable).toHaveBeenCalledOnce()
-      expect(sendSignal.mock.calls).toEqual([[20, 'SIGTERM']])
-      expect(vi.getTimerCount()).toBe(0)
-    } finally {
-      now.mockRestore()
-    }
-  })
-
-  it('keeps slow capture plus validation plus escalation inside the original shutdown bound', async () => {
+  it('bounds default capture and both independent signal phases', async () => {
     const initialCapture = deferred<ProcessTableCapture>()
     const validation = deferred<ProcessTableCapture>()
     const readTable = vi
@@ -383,9 +369,9 @@ describe('SIGTERM sequencing and shutdown budget', () => {
     validation.resolve(capture())
     await vi.advanceTimersByTimeAsync(0)
     expect(killRoot).toHaveBeenCalledOnce()
-    await vi.advanceTimersByTimeAsync(2_199)
+    await vi.advanceTimersByTimeAsync(2_999)
     expect(settled).toBe(false)
-    expect(readTable.mock.calls).toEqual([[1_000], [1_000], [200]])
+    expect(readTable.mock.calls).toEqual([[1_000], [1_000], [1_000]])
     await vi.advanceTimersByTimeAsync(1)
     await pending
     expect(sendSignal.mock.calls).toEqual([[20, 'SIGTERM']])

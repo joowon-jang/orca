@@ -52,6 +52,88 @@ describe('killWithDescendantSweep outer deadline', () => {
     expect(settled).toBe(true)
   })
 
+  it('never starts taskkill from a probe that resolves after the root deadline', async () => {
+    const probe = deferred<WindowsTreeKillTarget>()
+    const killRoot = vi.fn()
+    const killWindowsTree = vi.fn().mockResolvedValue(undefined)
+    const pending = killWithDescendantSweep(4242, killRoot, {
+      platform: 'win32',
+      verifyTreeKillTarget: () => probe.promise,
+      killWindowsTree,
+      sweepTimeoutMs: 1000
+    })
+    await vi.advanceTimersByTimeAsync(1000)
+    await pending
+    expect(killRoot).toHaveBeenCalledOnce()
+    probe.resolve('own')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(killWindowsTree).not.toHaveBeenCalled()
+    expect(killRoot).toHaveBeenCalledOnce()
+  })
+
+  it.each([false, true])(
+    'retains the root during tree discovery (awaitEscalation=%p)',
+    async (awaitEscalation) => {
+      const tree = deferred<void>()
+      const events: string[] = []
+      const pending = killWithDescendantSweep(
+        4242,
+        () => {
+          events.push('root-kill')
+        },
+        {
+          platform: 'win32',
+          verifyTreeKillTarget: async () => 'own',
+          killWindowsTree: async () => {
+            events.push('tree-start')
+            await tree.promise
+            events.push('tree-finished')
+          },
+          sweepTimeoutMs: 1000,
+          awaitEscalation
+        }
+      )
+      await vi.advanceTimersByTimeAsync(100)
+      expect(events).toEqual(['tree-start'])
+      tree.resolve()
+      await pending
+      expect(events).toEqual(['tree-start', 'tree-finished', 'root-kill'])
+    }
+  )
+
+  it('bounds an interactive wedged tree kill even without an explicit sweep budget', async () => {
+    const killRoot = vi.fn()
+    const pending = killWithDescendantSweep(4242, killRoot, {
+      platform: 'win32',
+      verifyTreeKillTarget: async () => 'own',
+      killWindowsTree: () => deferred<void>().promise
+    })
+    await vi.advanceTimersByTimeAsync(2399)
+    expect(killRoot).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    await pending
+    expect(killRoot).toHaveBeenCalledOnce()
+  })
+
+  it('bounds a default wedged probe before independent 5s root escalation', async () => {
+    const probe = deferred<WindowsTreeKillTarget>()
+    const killRoot = vi.fn()
+    const killWindowsTree = vi.fn()
+    const pending = killWithDescendantSweep(4242, killRoot, {
+      platform: 'win32',
+      verifyTreeKillTarget: () => probe.promise,
+      killWindowsTree
+    })
+    await vi.advanceTimersByTimeAsync(3999)
+    expect(killRoot).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    await pending
+    expect(killRoot).toHaveBeenCalledOnce()
+    probe.resolve('own')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(killWindowsTree).not.toHaveBeenCalled()
+  })
+
   it('fires killRoot exactly once when the sweep settles at the deadline', async () => {
     const killRoot = vi.fn()
     const pending = killWithDescendantSweep(4242, killRoot, {
@@ -90,6 +172,36 @@ describe('killWithDescendantSweep outer deadline', () => {
 
     gate.resolve()
   })
+
+  it.each([true, false])(
+    'aborts a pending taskkill before root release (outer deadline=%p)',
+    async (outerDeadline) => {
+      const events: string[] = []
+      const probe = deferred<WindowsTreeKillTarget>()
+      const pending = killWithDescendantSweep(
+        4242,
+        () => {
+          events.push('root-kill')
+        },
+        {
+          platform: 'win32',
+          verifyTreeKillTarget: () => probe.promise,
+          killWindowsTree: (_pid, options) => {
+            options?.signal?.addEventListener('abort', () => {
+              events.push('taskkill-aborted')
+            })
+            return new Promise<void>(() => {})
+          },
+          sweepTimeoutMs: 1000
+        }
+      )
+      await vi.advanceTimersByTimeAsync(outerDeadline ? 900 : 0)
+      probe.resolve('own')
+      await vi.advanceTimersByTimeAsync(outerDeadline ? 100 : 600)
+      await pending
+      expect(events).toEqual(['taskkill-aborted', 'root-kill'])
+    }
+  )
 
   it('bounds the POSIX escalation wait when the re-read hangs', async () => {
     const events: string[] = []
