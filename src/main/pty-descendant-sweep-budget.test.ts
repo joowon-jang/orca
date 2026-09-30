@@ -33,7 +33,8 @@ describe('killWithDescendantSweep outer deadline', () => {
     const pending = killWithDescendantSweep(4242, killRoot, {
       platform: 'win32',
       terminateOwnedTree: () => 'unavailable',
-      verifyTreeKillTarget: (): Promise<WindowsTreeKillTarget> => deferred<WindowsTreeKillTarget>().promise,
+      verifyTreeKillTarget: (): Promise<WindowsTreeKillTarget> =>
+        deferred<WindowsTreeKillTarget>().promise,
       killWindowsTree: vi.fn(),
       sweepTimeoutMs: 1000,
       awaitEscalation: true
@@ -100,6 +101,10 @@ describe('killWithDescendantSweep outer deadline', () => {
     ]
     const readTable = vi
       .fn()
+      .mockResolvedValueOnce({
+        rows: targetRows,
+        capturedAtMs: Date.parse('Tue Jul 14 12:00:00 2026')
+      })
       .mockResolvedValueOnce({
         rows: targetRows,
         capturedAtMs: Date.parse('Tue Jul 14 12:00:00 2026')

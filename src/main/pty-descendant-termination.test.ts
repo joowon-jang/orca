@@ -225,12 +225,14 @@ describe('terminateDescendantSnapshot', () => {
     vi.useRealTimers()
   })
 
-  it('SIGTERMs every snapshotted descendant immediately', () => {
+  it('SIGTERMs matching descendants only after the fresh identity read', async () => {
     const sendSignal = vi.fn()
     terminateDescendantSnapshot(snapshot([row(20, 10, 20), row(30, 20, 30)]), {
       sendSignal,
-      readTable: vi.fn().mockResolvedValue(tableCapture([]))
+      readTable: vi.fn().mockResolvedValue(tableCapture([row(20, 10, 20), row(30, 20, 30)]))
     })
+    expect(sendSignal).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(0)
     expect(sendSignal.mock.calls).toEqual([
       [20, 'SIGTERM'],
       [30, 'SIGTERM']
@@ -259,15 +261,17 @@ describe('terminateDescendantSnapshot', () => {
       sendSignal,
       readTable
     })
+    await vi.advanceTimersByTimeAsync(0)
     sendSignal.mockClear()
     await vi.advanceTimersByTimeAsync(DESCENDANT_KILL_GRACE_MS)
     expect(sendSignal.mock.calls).toEqual([[30, 'SIGKILL']])
   })
 
-  it('never escalates when the identity re-read fails', async () => {
+  it('sends no signals when the initial identity read fails', async () => {
     const sendSignal = vi.fn()
     const readTable = vi.fn().mockRejectedValue(new Error('ps exploded'))
     terminateDescendantSnapshot(snapshot([row(20, 10, 20)]), { sendSignal, readTable })
+    await vi.advanceTimersByTimeAsync(0)
     sendSignal.mockClear()
     await vi.advanceTimersByTimeAsync(DESCENDANT_KILL_GRACE_MS)
     expect(sendSignal).not.toHaveBeenCalled()
@@ -288,17 +292,19 @@ describe('terminateDescendantSnapshot', () => {
       sendSignal,
       readTable: vi.fn().mockResolvedValue(tableCapture([sameSecond], CAPTURED_AT_MS + 3_000))
     })
+    await vi.advanceTimersByTimeAsync(0)
     sendSignal.mockClear()
     await vi.advanceTimersByTimeAsync(DESCENDANT_KILL_GRACE_MS)
     expect(sendSignal).not.toHaveBeenCalled()
   })
 
-  it('bounds a wedged escalation read and releases its deadline timer', async () => {
+  it('bounds a wedged initial read and releases its deadline timer', async () => {
     const sendSignal = vi.fn()
     terminateDescendantSnapshot(snapshot([row(20, 10, 20)]), {
       sendSignal,
       readTable: vi.fn().mockReturnValue(new Promise<ProcessTableCapture>(() => {}))
     })
+    await vi.advanceTimersByTimeAsync(0)
     sendSignal.mockClear()
     await vi.advanceTimersByTimeAsync(DESCENDANT_KILL_GRACE_MS + DESCENDANT_SNAPSHOT_TIMEOUT_MS)
     expect(sendSignal).not.toHaveBeenCalled()
@@ -306,7 +312,7 @@ describe('terminateDescendantSnapshot', () => {
   })
 
   it('resolves its returned promise only once the grace-window escalation check finishes', async () => {
-    const readTable = vi.fn().mockResolvedValue(tableCapture([]))
+    const readTable = vi.fn().mockResolvedValue(tableCapture([row(20, 10, 20)]))
     let settled = false
     void terminateDescendantSnapshot(snapshot([row(20, 10, 20)]), {
       sendSignal: vi.fn(),
@@ -331,17 +337,20 @@ describe('terminateDescendantSnapshot', () => {
   it("leaves the grace-window and escalation deadline timers unref'd for a fire-and-forget caller (no awaitEscalation)", async () => {
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
     try {
-      const readTable = vi.fn().mockResolvedValue(tableCapture([]))
+      const readTable = vi.fn().mockResolvedValue(tableCapture([row(20, 10, 20)]))
       void terminateDescendantSnapshot(snapshot([row(20, 10, 20)]), {
         sendSignal: vi.fn(),
         readTable
       })
 
-      const graceTimer = setTimeoutSpy.mock.results[0]?.value as NodeJS.Timeout
+      const initialTimer = setTimeoutSpy.mock.results[0]?.value as NodeJS.Timeout
+      expect(initialTimer.hasRef()).toBe(false)
+      await vi.advanceTimersByTimeAsync(0)
+      const graceTimer = setTimeoutSpy.mock.results[1]?.value as NodeJS.Timeout
       expect(graceTimer.hasRef()).toBe(false)
 
       await vi.advanceTimersByTimeAsync(DESCENDANT_KILL_GRACE_MS)
-      const escalationTimer = setTimeoutSpy.mock.results[1]?.value as NodeJS.Timeout
+      const escalationTimer = setTimeoutSpy.mock.results[2]?.value as NodeJS.Timeout
       expect(escalationTimer.hasRef()).toBe(false)
     } finally {
       setTimeoutSpy.mockRestore()
@@ -356,18 +365,21 @@ describe('terminateDescendantSnapshot', () => {
   it("keeps the grace-window and escalation deadline timers ref'd when awaitEscalation is set", async () => {
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
     try {
-      const readTable = vi.fn().mockResolvedValue(tableCapture([]))
+      const readTable = vi.fn().mockResolvedValue(tableCapture([row(20, 10, 20)]))
       void terminateDescendantSnapshot(snapshot([row(20, 10, 20)]), {
         sendSignal: vi.fn(),
         readTable,
         awaitEscalation: true
       })
 
-      const graceTimer = setTimeoutSpy.mock.results[0]?.value as NodeJS.Timeout
+      const initialTimer = setTimeoutSpy.mock.results[0]?.value as NodeJS.Timeout
+      expect(initialTimer.hasRef()).toBe(true)
+      await vi.advanceTimersByTimeAsync(0)
+      const graceTimer = setTimeoutSpy.mock.results[1]?.value as NodeJS.Timeout
       expect(graceTimer.hasRef()).toBe(true)
 
       await vi.advanceTimersByTimeAsync(DESCENDANT_KILL_GRACE_MS)
-      const escalationTimer = setTimeoutSpy.mock.results[1]?.value as NodeJS.Timeout
+      const escalationTimer = setTimeoutSpy.mock.results[2]?.value as NodeJS.Timeout
       expect(escalationTimer.hasRef()).toBe(true)
     } finally {
       setTimeoutSpy.mockRestore()
@@ -378,7 +390,10 @@ describe('terminateDescendantSnapshot', () => {
     let settled = false
     void terminateDescendantSnapshot(snapshot([row(20, 10, 20)]), {
       sendSignal: vi.fn(),
-      readTable: vi.fn().mockReturnValue(new Promise<ProcessTableCapture>(() => {})),
+      readTable: vi
+        .fn()
+        .mockResolvedValueOnce(tableCapture([row(20, 10, 20)]))
+        .mockReturnValue(new Promise<ProcessTableCapture>(() => {})),
       awaitEscalation: true
     }).then(() => {
       settled = true
@@ -410,6 +425,7 @@ describe('terminateDescendantSnapshot', () => {
         readTable: vi.fn().mockResolvedValue(tableCapture([retained, fresh]))
       }
     )
+    await vi.advanceTimersByTimeAsync(0)
     sendSignal.mockClear()
 
     await vi.advanceTimersByTimeAsync(DESCENDANT_KILL_GRACE_MS)
