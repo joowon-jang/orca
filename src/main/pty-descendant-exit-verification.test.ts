@@ -1,180 +1,242 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
-import type { ProcessTableCapture, ProcessTableRow } from './pty-descendant-termination'
+import { terminateDescendantSnapshotWithVerdict } from './pty-descendant-exit-verification'
 import {
-  terminateDescendantSnapshotAndWait,
-  terminateDescendantSnapshotWithVerdict
-} from './pty-descendant-exit-verification'
+  collectDescendantRows,
+  type ProcessTableCapture,
+  type ProcessTableRow
+} from './pty-descendant-termination'
 
-const CAPTURED_AT_MS = Date.parse('Tue Jul 14 12:00:00 2026')
+const CAPTURED_AT = Date.parse('Tue Jul 14 12:00:00 2026')
+const STARTED_BEFORE = 'Mon Jul 13 12:54:47 2026'
+const STARTED_DURING = 'Tue Jul 14 12:00:00 2026'
 
-function row(
-  pid: number,
-  ppid: number,
-  pgid: number,
-  startedAt = 'Mon Jul 13 12:54:47 2026'
-): ProcessTableRow {
-  return { pid, ppid, pgid, startedAt }
+function row(pid: number, ppid = 10, startedAt = STARTED_BEFORE): ProcessTableRow {
+  return { pid, ppid, pgid: pid, startedAt }
 }
 
-function tableCapture(rows: ProcessTableRow[], capturedAtMs = CAPTURED_AT_MS): ProcessTableCapture {
-  return { rows, capturedAtMs }
+function capture(rows: ProcessTableRow[]): ProcessTableCapture {
+  return { rows, capturedAtMs: Date.now() }
 }
 
-function snapshot(
-  descendants: ProcessTableRow[],
-  rootPgid: number | null = 10,
-  capturedAtMs = CAPTURED_AT_MS
-) {
-  return {
-    ...(rootPgid === null ? {} : { root: { pid: 10, startedAt: 'Mon Jul 13 12:54:47 2026' } }),
-    rootPgid,
-    descendants,
-    capturedAtMs,
-    // Everything a walk returns was re-derived by it.
-    ...(rootPgid === null ? {} : { reDerivedPids: new Set(descendants.map((row) => row.pid)) })
-  }
-}
-
-describe('terminateDescendantSnapshotAndWait', () => {
+describe('descendant exit verification across partial process-table reads', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-  })
-  afterEach(() => {
-    vi.useRealTimers()
+    vi.setSystemTime(CAPTURED_AT + 100)
   })
 
-  it('escalates an identity-matched survivor and verifies its exit', async () => {
-    const survivor = row(20, 10, 20)
-    const sendSignal = vi.fn()
+  afterEach(() => vi.useRealTimers())
+
+  it('signals a descendant omitted from the first identity read when it reappears', async () => {
+    const first = row(20)
+    const later = row(30)
+    const snapshot = collectDescendantRows(10, [row(10, 1), first, later], CAPTURED_AT)
     const readTable = vi
       .fn()
-      .mockResolvedValueOnce(tableCapture([survivor]))
-      .mockResolvedValueOnce(tableCapture([]))
-
-    const pending = terminateDescendantSnapshotAndWait(snapshot([survivor]), {
-      sendSignal,
-      readTable,
-      graceMs: 0,
-      verifyMs: 200
-    })
-    await vi.advanceTimersByTimeAsync(50)
-
-    await expect(pending).resolves.toBe(true)
-    expect(sendSignal.mock.calls).toEqual([
-      [20, 'SIGTERM'],
-      [20, 'SIGKILL']
-    ])
-  })
-
-  it('does not claim exit when the verification table is unavailable', async () => {
+      .mockImplementationOnce(async () => capture([first]))
+      .mockImplementationOnce(async () => capture([first, later]))
+      .mockImplementation(async () => capture([]))
     const sendSignal = vi.fn()
-    const pending = terminateDescendantSnapshotAndWait(snapshot([row(20, 10, 20)]), {
+    const pending = terminateDescendantSnapshotWithVerdict(snapshot, {
+      readTable,
       sendSignal,
-      readTable: vi.fn().mockRejectedValue(new Error('ps exploded')),
-      verifyMs: 200
+      requireIdentityBeforeSignal: true,
+      graceMs: 200,
+      verifyMs: 300
     })
     await vi.advanceTimersByTimeAsync(400)
-
-    await expect(pending).resolves.toBe(false)
-    expect(sendSignal).toHaveBeenCalledWith(20, 'SIGTERM')
-  })
-
-  it('keeps polling past a read that missed its deadline rather than surrendering', async () => {
-    const survivor = row(20, 10, 20)
-    const readTable = vi
-      .fn()
-      // A loaded host can miss one read's deadline with the window still open.
-      .mockRejectedValueOnce(new Error('ps timed out'))
-      .mockResolvedValueOnce(tableCapture([survivor]))
-      .mockResolvedValueOnce(tableCapture([]))
-    const sendSignal = vi.fn()
-
-    const pending = terminateDescendantSnapshotWithVerdict(snapshot([survivor]), {
-      sendSignal,
-      readTable,
-      graceMs: 0,
-      verifyMs: 2_000
-    })
-    await vi.advanceTimersByTimeAsync(500)
 
     await expect(pending).resolves.toBe('exited')
     expect(sendSignal.mock.calls).toEqual([
       [20, 'SIGTERM'],
-      [20, 'SIGKILL']
+      [30, 'SIGTERM']
     ])
   })
 
-  it('names a survivor seen at the deadline live, never unverifiable', async () => {
-    const survivor = row(20, 10, 20)
-    const pending = terminateDescendantSnapshotWithVerdict(snapshot([survivor]), {
-      sendSignal: vi.fn(),
-      readTable: vi.fn().mockResolvedValue(tableCapture([survivor])),
+  it('proves a target gone that only the snapshot saw, once two later reads miss it', async () => {
+    // A root that exits on its own takes a short-lived child with it before the first poll.
+    const snapshot = collectDescendantRows(10, [row(10, 1), row(20)], CAPTURED_AT)
+    const sendSignal = vi.fn()
+    const pending = terminateDescendantSnapshotWithVerdict(snapshot, {
+      readTable: vi.fn().mockImplementation(async () => capture([])),
+      sendSignal,
+      requireIdentityBeforeSignal: true,
+      graceMs: 0,
+      verifyMs: 3_500
+    })
+    let verdict: string | undefined
+    void pending.then((value) => {
+      verdict = value
+    })
+    // Proven within a few polls, not by waiting out the verification window.
+    await vi.advanceTimersByTimeAsync(200)
+
+    expect(verdict).toBe('exited')
+    expect(sendSignal).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(4_000)
+  })
+
+  it('does not count an absence from a read that started before the target was seen', async () => {
+    const unseen = row(30)
+    const snapshot = collectDescendantRows(10, [row(10, 1), unseen], CAPTURED_AT)
+    const sendSignal = vi.fn()
+    // A shared read already in flight when the snapshot ran cannot list a descendant forked since.
+    const staleRead = { rows: [], capturedAtMs: CAPTURED_AT - 1 }
+    const pending = terminateDescendantSnapshotWithVerdict(snapshot, {
+      readTable: vi.fn().mockResolvedValue(staleRead),
+      sendSignal,
+      requireIdentityBeforeSignal: true,
       graceMs: 0,
       verifyMs: 100
     })
     await vi.advanceTimersByTimeAsync(200)
 
-    await expect(pending).resolves.toBe('live')
+    await expect(pending).resolves.toBe('unverifiable')
+    expect(sendSignal).not.toHaveBeenCalled()
   })
 
-  it('names an unreadable verification table unverifiable', async () => {
-    const pending = terminateDescendantSnapshotWithVerdict(snapshot([row(20, 10, 20)]), {
+  it('keeps the latest sighting when an earlier-started read that matches resolves later', async () => {
+    const target = row(20)
+    const snapshot = collectDescendantRows(10, [row(10, 1), target], CAPTURED_AT)
+    const readTable = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [target], capturedAtMs: CAPTURED_AT + 300 })
+      .mockResolvedValueOnce({ rows: [target], capturedAtMs: CAPTURED_AT + 100 })
+      // Began between the two sightings, so it cannot prove the later one gone.
+      .mockResolvedValue({ rows: [], capturedAtMs: CAPTURED_AT + 200 })
+    const pending = terminateDescendantSnapshotWithVerdict(snapshot, {
+      readTable,
       sendSignal: vi.fn(),
-      readTable: vi.fn().mockRejectedValue(new Error('ps exploded')),
-      verifyMs: 200
+      requireIdentityBeforeSignal: true,
+      graceMs: 10_000,
+      verifyMs: 300
     })
     await vi.advanceTimersByTimeAsync(400)
 
     await expect(pending).resolves.toBe('unverifiable')
   })
 
-  it('does not signal a recycled descendant when identity validation is required', async () => {
-    const sendSignal = vi.fn()
-    const recycled = row(20, 10, 20, 'Tue Jul 14 13:00:00 2026')
-    const pending = terminateDescendantSnapshotWithVerdict(
-      snapshot([row(20, 10, 20, 'Tue Jul 14 12:00:00 2026')]),
-      {
-        sendSignal,
-        readTable: vi.fn().mockResolvedValue(tableCapture([recycled])),
-        requireIdentityBeforeSignal: true,
-        verifyMs: 100
-      }
-    )
+  it('counts the read after the deadline as an absence', async () => {
+    const snapshot = collectDescendantRows(10, [row(10, 1), row(20)], CAPTURED_AT)
+    const readTable = vi.fn().mockImplementation(async () => capture([]))
+    // One poll fits in the window; the final read supplies the second absence.
+    const pending = terminateDescendantSnapshotWithVerdict(snapshot, {
+      readTable,
+      sendSignal: vi.fn(),
+      requireIdentityBeforeSignal: true,
+      graceMs: 0,
+      verifyMs: 50
+    })
+    await vi.advanceTimersByTimeAsync(100)
 
-    await vi.advanceTimersByTimeAsync(200)
     await expect(pending).resolves.toBe('exited')
-    expect(sendSignal).not.toHaveBeenCalled()
+    expect(readTable).toHaveBeenCalledTimes(2)
   })
 
-  it('uses row-scoped boundaries for forced cleanup in the exit verifier', async () => {
-    const oldBoundary = CAPTURED_AT_MS + 900
-    const refreshBoundary = CAPTURED_AT_MS + 2_100
-    const retained = row(20, 10, 20, 'Tue Jul 14 12:00:00 2026')
-    const fresh = row(30, 10, 30, 'Tue Jul 14 12:00:01 2026')
+  it('escalates a survivor omitted at the first force-kill read when it reappears', async () => {
+    const first = row(20)
+    const later = row(30)
+    const snapshot = collectDescendantRows(10, [row(10, 1), first, later], CAPTURED_AT)
+    const readTable = vi
+      .fn()
+      .mockImplementationOnce(async () => capture([first, later]))
+      .mockImplementationOnce(async () => capture([first]))
+      .mockImplementationOnce(async () => capture([first, later]))
+      .mockImplementation(async () => capture([]))
     const sendSignal = vi.fn()
-    const pending = terminateDescendantSnapshotWithVerdict(
-      {
-        ...snapshot([retained, fresh], 10, refreshBoundary),
-        capturedAtMsByPid: { '20': oldBoundary, '30': refreshBoundary },
-        // What a merge produces: only the refresh re-derived 30; 20 is retained.
-        reDerivedPids: new Set([30])
-      },
-      {
+    const pending = terminateDescendantSnapshotWithVerdict(snapshot, {
+      readTable,
+      sendSignal,
+      requireIdentityBeforeSignal: true,
+      graceMs: 50,
+      verifyMs: 300
+    })
+    await vi.advanceTimersByTimeAsync(400)
+
+    await expect(pending).resolves.toBe('exited')
+    expect(sendSignal.mock.calls).toEqual([
+      [20, 'SIGTERM'],
+      [30, 'SIGTERM'],
+      [20, 'SIGKILL'],
+      [30, 'SIGKILL']
+    ])
+  })
+
+  it.each(['absent root', 'changed root', 'reparented target', 'ambiguous parent'])(
+    'withholds birth-second escalation with an %s in the fresh read',
+    async (scenario) => {
+      const root = row(10, 1)
+      const parent = row(20)
+      const child = row(30, 20, STARTED_DURING)
+      const snapshot = collectDescendantRows(10, [root, parent, child], CAPTURED_AT)
+      const rows =
+        scenario === 'absent root'
+          ? [parent, child]
+          : scenario === 'changed root'
+            ? [row(10, 1, STARTED_DURING), parent, child]
+            : scenario === 'reparented target'
+              ? [root, parent, { ...child, ppid: 1 }]
+              : [root, parent, { ...parent, ppid: 1 }, child]
+      const sendSignal = vi.fn()
+      const pending = terminateDescendantSnapshotWithVerdict(snapshot, {
+        readTable: async () => capture(rows),
         sendSignal,
-        readTable: vi.fn().mockResolvedValue(tableCapture([retained, fresh])),
         requireIdentityBeforeSignal: true,
         graceMs: 0,
         verifyMs: 100
-      }
-    )
+      })
+      await vi.advanceTimersByTimeAsync(200)
+
+      await expect(pending).resolves.toBe(scenario === 'ambiguous parent' ? 'unverifiable' : 'live')
+      expect(sendSignal).not.toHaveBeenCalledWith(child.pid, 'SIGTERM')
+      expect(sendSignal).not.toHaveBeenCalledWith(child.pid, 'SIGKILL')
+    }
+  )
+
+  it('escalates a birth-second descendant freshly re-derived from the same root', async () => {
+    const rows = [row(10, 1), row(20, 10, STARTED_DURING)]
+    const snapshot = collectDescendantRows(10, rows, CAPTURED_AT)
+    const sendSignal = vi.fn()
+    const pending = terminateDescendantSnapshotWithVerdict(snapshot, {
+      readTable: async () => capture(rows),
+      sendSignal,
+      requireIdentityBeforeSignal: true,
+      graceMs: 0,
+      verifyMs: 100
+    })
     await vi.advanceTimersByTimeAsync(200)
 
     await expect(pending).resolves.toBe('live')
     expect(sendSignal.mock.calls).toEqual([
       [20, 'SIGTERM'],
-      [30, 'SIGTERM'],
-      [30, 'SIGKILL']
+      [20, 'SIGKILL']
+    ])
+  })
+
+  it('signals an initially unverifiable birth-second target when fresh ownership returns', async () => {
+    const root = row(10, 1)
+    const child = row(20, 10, STARTED_DURING)
+    const snapshot = collectDescendantRows(10, [root, child], CAPTURED_AT)
+    const readTable = vi
+      .fn()
+      .mockImplementationOnce(async () => capture([child]))
+      .mockImplementation(async () => capture([root, child]))
+    const sendSignal = vi.fn()
+    const pending = terminateDescendantSnapshotWithVerdict(snapshot, {
+      readTable,
+      sendSignal,
+      requireIdentityBeforeSignal: true,
+      graceMs: 100,
+      verifyMs: 200
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sendSignal).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(50)
+    expect(sendSignal.mock.calls).toEqual([[20, 'SIGTERM']])
+    await vi.advanceTimersByTimeAsync(150)
+    await expect(pending).resolves.toBe('live')
+    expect(sendSignal.mock.calls).toEqual([
+      [20, 'SIGTERM'],
+      [20, 'SIGKILL']
     ])
   })
 })

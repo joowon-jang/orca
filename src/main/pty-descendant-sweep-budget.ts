@@ -23,7 +23,7 @@ import {
 
 export type WindowsSweepDeps = {
   platform?: NodeJS.Platform
-  awaitEscalation?: boolean
+  awaitEscalation?: boolean | (() => boolean)
   ownsRoot?: () => boolean
   /**
    * Terminate the PTY's job object. Returns `unavailable` when this tree has
@@ -46,6 +46,13 @@ export type WindowsSweepDeps = {
    * keeps the legacy behavior (inner operations bound themselves).
    */
   sweepTimeoutMs?: number
+}
+
+function shouldAwaitEscalation(deps: WindowsSweepDeps): boolean {
+  return (
+    (typeof deps.awaitEscalation === 'function' ? deps.awaitEscalation() : deps.awaitEscalation) ??
+    false
+  )
 }
 
 type SweepBudgets = { preKillMs: number; escalationMs: number }
@@ -121,7 +128,7 @@ export async function runWindowsSweepWithDeadline(
       fireRootOnce()
       resolve()
     }, total)
-    if (!(deps.awaitEscalation ?? false)) {
+    if (!shouldAwaitEscalation(deps)) {
       timer.unref?.()
     }
     void run.then(() => {
@@ -192,7 +199,7 @@ async function runWindowsSweep(
   } finally {
     killRoot()
   }
-  if (deps.awaitEscalation) {
+  if (shouldAwaitEscalation(deps)) {
     await (budgets
       ? settleEscalationWithin(treeKillEscalation, budgets.escalationMs, true)
       : treeKillEscalation)

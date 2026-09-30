@@ -41,6 +41,7 @@ vi.mock('@/store', () => ({
 
 import {
   getStructuredAgentLaunchStatus,
+  getStructuredAgentSessionLaunchResumes,
   startStructuredAgentLaunch
 } from './structured-agent-session-launch'
 
@@ -63,11 +64,16 @@ describe('a launch that adopts a conversation is its own identity', () => {
     vi.clearAllMocks()
     localStorage.clear()
     mocks.refresh.mockResolvedValue([])
-    mocks.call.mockImplementation(async (_target: unknown, method: string) =>
-      method === 'agentSession.create'
-        ? new Promise(() => {})
-        : { ok: true, value: { submission: { dispatchState: 'accepted' } } }
-    )
+    mocks.call.mockImplementation(async (_target: unknown, method: string) => {
+      if (method === 'agentSession.create') {
+        return new Promise(() => {})
+      }
+      // Both providers now ask the executing host before creating.
+      if (method === 'agentSession.createSupport') {
+        return { supported: true }
+      }
+      return { ok: true, value: { submission: { dispatchState: 'accepted' } } }
+    })
   })
 
   it('does not hand a resume the blank launch already pending for the same worktree', async () => {
@@ -82,6 +88,9 @@ describe('a launch that adopts a conversation is its own identity', () => {
     await flushLaunchDispatch()
 
     expect(resume.sessionId).not.toBe(blank.sessionId)
+    // A resumed conversation may keep its own model, so its picker names no listed default.
+    expect(getStructuredAgentSessionLaunchResumes(resume.sessionId)).toBe(true)
+    expect(getStructuredAgentSessionLaunchResumes(blank.sessionId)).toBe(false)
     expect(createParams()).toEqual([
       expect.not.objectContaining({ resumeFrom: expect.anything() }),
       expect.objectContaining({ resumeFrom: { providerSessionId: 'thread-1' } })

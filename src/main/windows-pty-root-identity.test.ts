@@ -165,9 +165,7 @@ describe('verifyWindowsTreeKillTarget with a spawn-anchored creation time', () =
     creationTimeMs === undefined ? { pid, ppid } : { pid, ppid, creationTimeMs }
 
   it('keeps an own verdict when the root creation time matches the spawn baseline', async () => {
-    const readIdentityRows = vi
-      .fn()
-      .mockResolvedValue([identityRow(4242, ORCA_PID, SPAWNED_AT)])
+    const readIdentityRows = vi.fn().mockResolvedValue([identityRow(4242, ORCA_PID, SPAWNED_AT)])
     await expect(
       verifyWindowsTreeKillTarget(4242, {
         readIdentityRows,
@@ -181,12 +179,14 @@ describe('verifyWindowsTreeKillTarget with a spawn-anchored creation time', () =
   it('resolves foreign when the PID was recycled onto another Orca descendant (#10680)', async () => {
     // Same shape as the ancestry-only hole above, but the occupant started
     // later than the recorded root — a different process wearing our PID.
-    const readIdentityRows = vi.fn().mockResolvedValue([
-      identityRow(ORCA_PID, 900, SPAWNED_AT - 60_000),
-      identityRow(7000, ORCA_PID, SPAWNED_AT - 30_000),
-      identityRow(7100, 7000, SPAWNED_AT - 10_000),
-      identityRow(4242, 7100, SPAWNED_AT + 5_000)
-    ])
+    const readIdentityRows = vi
+      .fn()
+      .mockResolvedValue([
+        identityRow(ORCA_PID, 900, SPAWNED_AT - 60_000),
+        identityRow(7000, ORCA_PID, SPAWNED_AT - 30_000),
+        identityRow(7100, 7000, SPAWNED_AT - 10_000),
+        identityRow(4242, 7100, SPAWNED_AT + 5_000)
+      ])
     await expect(
       verifyWindowsTreeKillTarget(4242, {
         readIdentityRows,

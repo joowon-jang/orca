@@ -1,21 +1,12 @@
-import { killWithDescendantSweep } from '../pty-descendant-termination'
 import type { Session } from './session'
 import type { TakePendingOutputResult, TerminalSnapshot } from './types'
+import { killWithDescendantSweep } from '../pty-descendant-termination'
+import { terminateShutdownDescendants } from './terminal-descendant-shutdown'
 import { runWslGuestTreeKill } from './wsl-guest-tree-kill'
 
-/**
- * Bound for one session's descendant sweep at daemon shutdown. Fits inside
- * daemon-entry's SHUTDOWN_TIMEOUT_MS with headroom for checkpoints: the
- * sweep's killRoot fires by this deadline and only the escalation wait is
- * cut, never the kill itself.
- */
-const DAEMON_SWEEP_TIMEOUT_MS = 4_000
+// Leave room for checkpoints and physical root exit within the daemon shutdown budget.
+const DAEMON_WINDOWS_SWEEP_TIMEOUT_MS = 4_000
 
-/**
- * Guest-side tree kill for a WSL agent session. Null when there is no guest
- * tree to name (non-WSL, or spawned before the marker existed) — the
- * Windows-side sweep then runs alone, as before.
- */
 function startWslGuestTreeKill(session: Session): Promise<void> | null {
   if (process.platform !== 'win32') {
     return null
@@ -26,6 +17,27 @@ function startWslGuestTreeKill(session: Session): Promise<void> | null {
     return null
   }
   return runWslGuestTreeKill({ distro: wslDistro, treeId: ptyTreeId })
+}
+
+async function disposeLiveSession(session: Session): Promise<void> {
+  if (!session.beginTermination() && !session.isAlive) {
+    await session.forceKillAndDisposeSubprocess()
+    return
+  }
+  try {
+    const sweep = killWithDescendantSweep(session.pid, () => {}, {
+      ownsRoot: () => session.isAlive,
+      terminateOwnedTree: () => session.terminateOwnedTree(),
+      expectedRootCreationTimeMs: session.spawnIdentity?.rootCreationTimeMs,
+      sweepTimeoutMs: process.platform === 'win32' ? DAEMON_WINDOWS_SWEEP_TIMEOUT_MS : undefined,
+      terminateDescendants: terminateShutdownDescendants,
+      awaitEscalation: true
+    })
+    // The guest kill has its own wsl.exe client; concurrent cleanup avoids stacking deadlines.
+    await Promise.all([sweep, startWslGuestTreeKill(session)])
+  } finally {
+    await session.forceKillAndDisposeSubprocess()
+  }
 }
 
 function checkpointTerminalHostSessions(
@@ -55,60 +67,25 @@ function checkpointTerminalHostSessions(
   }
 }
 
-async function disposeTerminalHostSessions(sessions: Iterable<Session>): Promise<void> {
+async function disposeTerminalHostSessions(
+  sessions: Iterable<Session>,
+  isAlreadyTracked?: (session: Session) => boolean
+): Promise<void> {
   const results = await Promise.allSettled(
     [...sessions].map(async (session) => {
       session.detachAllClients()
+      if (isAlreadyTracked?.(session)) {
+        // A tracked host-side close does not reach the WSL guest tree.
+        await startWslGuestTreeKill(session)
+        return
+      }
       // Why: live children retain native ownership until physical exit, while
       // exited children must release handles without signalling a recycled pid.
-      if (!session.isAlive) {
+      if (session.isAlive) {
+        await disposeLiveSession(session)
+      } else {
         session.disposeSubprocess()
-        return
       }
-      if (session.launchAgent) {
-        // Why: an agent's tool children live in a detached process group the
-        // shell's own kill signal never reaches; daemon shutdown must sweep
-        // them too, or a quit orphans them instead of just an interactive
-        // pty.kill (mirrors SessionTerminationController.kill()'s sweep).
-        // The snapshot must finish before the root is force-killed below: once
-        // it exits, surviving descendants reparent to pid 1 and are lost.
-        // killRoot force-kills the root right away, so a daemon quit cannot
-        // leave it alive for the grace window below — it must not wait on
-        // forceKillPromise itself. awaitEscalation instead delays this
-        // function's own return: the daemon process exits right after
-        // shutdown resolves, which would otherwise drop the grace-window
-        // SIGKILL escalation's unref'd timer mid-flight and leave
-        // SIGTERM-ignoring children alive. The sweep below carries an
-        // explicit DAEMON_SWEEP_TIMEOUT_MS bound, so the wait cannot exceed
-        // the daemon's shutdown budget either.
-        let forceKillPromise: Promise<void> = Promise.resolve()
-        const sweepSettled = killWithDescendantSweep(
-          session.pid,
-          () => {
-            forceKillPromise = session.forceKillAndDisposeSubprocess()
-            // Why: killWithDescendantSweep may not await the sweep's own
-            // return until after the grace window; attach a handler now so a
-            // rejection there can't surface as unhandled before the await below.
-            forceKillPromise.catch(() => {})
-          },
-          {
-            ownsRoot: () => session.isAlive,
-            terminateOwnedTree: () => session.terminateOwnedTree(),
-            expectedRootCreationTimeMs: session.spawnIdentity?.rootCreationTimeMs,
-            sweepTimeoutMs: DAEMON_SWEEP_TIMEOUT_MS,
-            awaitEscalation: true
-          }
-        )
-        // Why concurrent, not sequential: the guest kill uses a fresh wsl.exe
-        // client, so the Windows-side sweep tearing down this session's own
-        // wsl.exe cannot disturb it — and sequential timeouts would stack
-        // past the daemon's shutdown budget. Both sides are bounded, so the
-        // slower one, not the sum, decides the cost.
-        await Promise.all([sweepSettled, startWslGuestTreeKill(session)])
-        await forceKillPromise
-        return
-      }
-      await session.forceKillAndDisposeSubprocess()
     })
   )
   const rejected = results.find(
@@ -125,9 +102,10 @@ export async function shutdownTerminalHostSessions(
     sessionId: string,
     snapshot: TerminalSnapshot,
     records: TakePendingOutputResult['records']
-  ) => void
+  ) => void,
+  isAlreadyTracked?: (session: Session) => boolean
 ): Promise<void> {
   checkpointTerminalHostSessions(sessions, onFinalCheckpoint)
-  await disposeTerminalHostSessions(sessions.values())
+  await disposeTerminalHostSessions(sessions.values(), isAlreadyTracked)
   sessions.clear()
 }

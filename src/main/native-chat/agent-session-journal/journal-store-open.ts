@@ -1,4 +1,7 @@
-import { mkdir } from 'node:fs/promises'
+import type {
+  AgentJournalItemBody,
+  AgentJournalItemIdentity
+} from '../../../shared/agent-session-journal-types'
 import type { AgentType } from '../../../shared/agent-status-types'
 import {
   findJournalFileFormatRemnant,
@@ -6,14 +9,11 @@ import {
 } from './journal-file-format-remnant'
 import type { JournalLoad } from './journal-open'
 import { journalRepairDisclosure, type JournalRepairDisclosure } from './journal-repair-disclosure'
+import { staleSubagentRosterRevisions } from './journal-subagent-liveness'
 
 /** What any of this file's disclosures hands the store — a repair's, or the
  *  pre-SQLite notice's. Same shape, and neither is only a repair. */
 type JournalDisclosure = JournalRepairDisclosure
-
-export async function ensureJournalDir(journalDir: string): Promise<void> {
-  await mkdir(journalDir, { recursive: true })
-}
 
 export function journalStoreLoadedFields(loaded: JournalLoad) {
   return {
@@ -24,8 +24,7 @@ export function journalStoreLoadedFields(loaded: JournalLoad) {
 }
 
 export async function openJournalStoreState(input: {
-  journalDir: string
-  loaded: JournalLoad | null | undefined
+  legacyDirectory: string
   replay: () => JournalLoad | null
   /** Drops the rejected suffix and records the rebuild it owes, in ONE
    *  transaction. Corruption is not preserved; replay keeps reporting `corrupt`
@@ -36,9 +35,9 @@ export async function openJournalStoreState(input: {
   adopt: (loaded: JournalLoad) => void
   /** Republishes an anchor row for an epoch a repair emptied. */
   publishRepairEpoch: () => void
-  appendDisclosure: (
-    identity: JournalRepairDisclosure['identity'],
-    body: JournalRepairDisclosure['body'],
+  appendItem: (
+    identity: AgentJournalItemIdentity,
+    body: AgentJournalItemBody,
     fence: number
   ) => Promise<unknown>
   agent: AgentType
@@ -47,7 +46,7 @@ export async function openJournalStoreState(input: {
   setMalformedRows: (count: number) => void
   readOnly: () => boolean
 }): Promise<void> {
-  const loaded = input.loaded !== undefined ? input.loaded : input.replay()
+  const loaded = input.replay()
   if (!loaded) {
     input.start()
     await discloseFileFormatRemnant(input)
@@ -68,8 +67,9 @@ export async function openJournalStoreState(input: {
   }
   if (input.malformedRows() > 0 && !input.readOnly()) {
     const disclosure = journalRepairDisclosure({ malformedRows: input.malformedRows() })
-    await input.appendDisclosure(disclosure.identity, disclosure.body, input.highestFence())
+    await input.appendItem(disclosure.identity, disclosure.body, input.highestFence())
   }
+  await settleStaleSubagentRosters(input, loaded)
   // Founding the epoch and appending the row are two transactions, and a
   // committed epoch sends every later open down this branch instead. Anything
   // that interrupts between them — a quit during startup restore, a failed
@@ -90,9 +90,9 @@ export async function openJournalStoreState(input: {
  *  Upserts by a constant identity, so the offer above is exactly-once in effect:
  *  once the row exists the epoch is no longer empty. */
 async function discloseFileFormatRemnant(input: {
-  journalDir: string
+  legacyDirectory: string
   agent: AgentType
-  appendDisclosure: (
+  appendItem: (
     identity: JournalDisclosure['identity'],
     body: JournalDisclosure['body'],
     fence: number
@@ -103,10 +103,37 @@ async function discloseFileFormatRemnant(input: {
   if (input.readOnly()) {
     return
   }
-  const transcriptPath = findJournalFileFormatRemnant(input.journalDir)
+  const transcriptPath = findJournalFileFormatRemnant(input.legacyDirectory)
   if (!transcriptPath) {
     return
   }
   const disclosure = journalFileFormatRemnantDisclosure({ transcriptPath, agent: input.agent })
-  await input.appendDisclosure(disclosure.identity, disclosure.body, input.highestFence())
+  await input.appendItem(disclosure.identity, disclosure.body, input.highestFence())
+}
+
+/**
+ * Retires a `working` subagent roster the previous host never got to settle.
+ *
+ * Skipped on a corrupt load: that journal is still owed a rebuild from provider
+ * history, and content written past the repair's free sequence retires the
+ * demand for it.
+ */
+async function settleStaleSubagentRosters(
+  input: {
+    appendItem: (
+      identity: AgentJournalItemIdentity,
+      body: AgentJournalItemBody,
+      fence: number
+    ) => Promise<unknown>
+    highestFence: () => number
+    readOnly: () => boolean
+  },
+  loaded: JournalLoad
+): Promise<void> {
+  if (input.readOnly() || loaded.corrupt) {
+    return
+  }
+  for (const revision of staleSubagentRosterRevisions(loaded.state.items.values())) {
+    await input.appendItem(revision.identity, revision.body, input.highestFence())
+  }
 }

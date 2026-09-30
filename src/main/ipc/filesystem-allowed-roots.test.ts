@@ -8,6 +8,7 @@ import { listRepoWorktreeGraph } from '../repo-worktrees'
 import type * as ProjectGroupsModule from '../../shared/project-groups'
 import { buildProjectGroupChildIndex, getProjectGroupSubtreeIds } from '../../shared/project-groups'
 import { isPathInsideOrEqual } from '../../shared/cross-platform-path'
+import type * as CrossPlatformPathModule from '../../shared/cross-platform-path'
 import { getWorktreeMirrorDistro } from '../project-runtime-git-options'
 import type { FolderWorkspace } from '../../shared/folder-workspace-types'
 import type { ProjectGroup } from '../../shared/project-group-types'
@@ -30,6 +31,13 @@ vi.mock('../../shared/project-groups', async () => {
     buildProjectGroupChildIndex: vi.fn(actual.buildProjectGroupChildIndex),
     getProjectGroupSubtreeIds: vi.fn(actual.getProjectGroupSubtreeIds)
   }
+})
+
+vi.mock('../../shared/cross-platform-path', async () => {
+  const actual = await vi.importActual<typeof CrossPlatformPathModule>(
+    '../../shared/cross-platform-path'
+  )
+  return { ...actual, isPathInsideOrEqual: vi.fn(actual.isPathInsideOrEqual) }
 })
 
 type StoreFixture = {
@@ -257,10 +265,24 @@ beforeEach(() => {
 })
 
 describe('getAllowedRoots', () => {
-  it('produces the same roots as the pre-change implementation', () => {
-    const { store } = makeCountingStore(makeMixedFixture())
-
-    expect(getAllowedRoots(store)).toEqual(referenceAllowedRoots(store))
+  it('stops scanning repositories when a local candidate settles each folder scope', () => {
+    const fixture: StoreFixture = {
+      repos: Array.from({ length: 1_000 }, (_, index) =>
+        makeRepo({ id: `repo-${index}`, path: `/folders/root/repo-${index}` })
+      ),
+      projects: [],
+      projectGroups: [],
+      folderWorkspaces: Array.from({ length: 100 }, (_, index) =>
+        makeWorkspace({ id: `folder-${index}`, folderPath: '/folders/root' })
+      )
+    }
+    const { store } = makeCountingStore(fixture)
+    vi.mocked(isPathInsideOrEqual).mockClear()
+    const actual = getAllowedRoots(store)
+    expect(isPathInsideOrEqual).toHaveBeenCalledTimes(100)
+    vi.mocked(isPathInsideOrEqual).mockClear()
+    expect(actual).toEqual(referenceAllowedRoots(store))
+    expect(isPathInsideOrEqual).toHaveBeenCalledTimes(100_000)
   })
 
   it('reads the store once and indexes project groups once per build', () => {

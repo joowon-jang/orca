@@ -1,5 +1,8 @@
 import { execFile } from 'node:child_process'
 import { matchingSignalTargets } from './pty-descendant-signal-targets'
+import { parseProcessTable, type ProcessTableRow } from './pty-process-table-parser'
+
+export { parseProcessTable, type ProcessTableRow } from './pty-process-table-parser'
 export {
   hasUnambiguousStartIdentity,
   hasUnambiguousStartTime
@@ -11,15 +14,6 @@ export const DESCENDANT_SNAPSHOT_TIMEOUT_MS = 1_000
 // Why: a full process table on a busy host can exceed execFile's 1MB default;
 // truncation would silently drop descendants from the snapshot.
 const PS_MAX_BUFFER_BYTES = 32 * 1024 * 1024
-
-export type ProcessTableRow = {
-  pid: number
-  ppid: number
-  pgid: number
-  /** ps lstart text, kept verbatim. Both signals require an unambiguous
-   * capture-second boundary and matching pgid. */
-  startedAt: string
-}
 
 export type PosixProcessIdentity = Pick<ProcessTableRow, 'pid' | 'startedAt'>
 
@@ -50,25 +44,6 @@ export type ProcessTableCapture = {
 
 export type ProcessTableReader = (timeoutMs?: number) => Promise<ProcessTableCapture>
 export type SignalSender = (pid: number, signal: NodeJS.Signals) => void
-
-export function parseProcessTable(psOutput: string): ProcessTableRow[] {
-  const rows: ProcessTableRow[] = []
-  for (const line of psOutput.split('\n')) {
-    // lstart itself contains spaces ("Mon Jul 13 12:54:47 2026"), so only the
-    // three leading numeric columns are positional.
-    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.+?)\s*$/)
-    if (!match) {
-      continue
-    }
-    rows.push({
-      pid: Number(match[1]),
-      ppid: Number(match[2]),
-      pgid: Number(match[3]),
-      startedAt: match[4]
-    })
-  }
-  return rows
-}
 
 function readFreshProcessTable(
   timeoutMs = DESCENDANT_SNAPSHOT_TIMEOUT_MS
@@ -256,7 +231,11 @@ export async function captureDescendantSnapshot(
   return collectDescendantRows(rootPid, capture.rows, capture.capturedAtMs)
 }
 
-type KillSweepDeps = SnapshotDeps & TerminateDeps & WindowsSweepDeps
+type KillSweepDeps = Omit<SnapshotDeps & TerminateDeps & WindowsSweepDeps, 'awaitEscalation'> & {
+  /** Shutdown can retain the owner until descendant verification finishes. */
+  terminateDescendants?: (snapshot: DescendantSnapshot) => void | Promise<unknown>
+  awaitEscalation?: boolean | (() => boolean)
+}
 
 /**
  * Standard agent-session kill sequencing.
@@ -265,10 +244,9 @@ type KillSweepDeps = SnapshotDeps & TerminateDeps & WindowsSweepDeps
  *   (exact, no probe), else the identity-gated `taskkill /T /F` fallback.
  * Callers must not signal the root before this runs on POSIX — a dead root's
  * descendants reparent to pid 1 and become unfindable. Snapshot failure
- * degrades to killRoot alone on POSIX. killRoot always runs right after the
- * identity-checked SIGTERM sweep (POSIX) or the identity probe (Windows/WSL fallback),
- * regardless of `awaitEscalation` — only the promise this function returns,
- * not killRoot's own timing, is delayed by it.
+ * degrades to killRoot alone on POSIX. The default sweep kills the root after
+ * identity-checked SIGTERM, before grace. A custom shutdown verifier with
+ * awaitEscalation retains the root until its descendant proof finishes.
  */
 export async function killWithDescendantSweep(
   rootPid: number,
@@ -287,17 +265,30 @@ export async function killWithDescendantSweep(
 
   const snapshot = await captureDescendantSnapshot(rootPid, deps)
   let escalation: Promise<void> = Promise.resolve()
+  const awaitEscalation =
+    typeof deps.awaitEscalation === 'function' ? deps.awaitEscalation() : deps.awaitEscalation
   try {
     // Signal the captured descendants while their parent links still exist;
     // killing the root first creates a reparent/PID-reuse window.
     if (snapshot && (deps.ownsRoot?.() ?? true)) {
-      const started = await startDescendantTermination(snapshot, deps, deps.ownsRoot)
-      escalation = started.escalation
+      if (deps.terminateDescendants) {
+        const descendants = deps.terminateDescendants(snapshot)
+        if (awaitEscalation) {
+          await descendants
+        }
+      } else {
+        const started = await startDescendantTermination(
+          snapshot,
+          { ...deps, awaitEscalation },
+          deps.ownsRoot
+        )
+        escalation = started.escalation
+      }
     }
   } finally {
     killRoot()
   }
-  if (deps.awaitEscalation) {
+  if (awaitEscalation) {
     await escalation
   }
 }

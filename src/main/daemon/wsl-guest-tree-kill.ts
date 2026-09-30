@@ -1,5 +1,9 @@
 import { buildWslExecArgs } from '../../shared/wsl-login-shell-command'
-import { runProcess, type ProcessResult, type ProcessSpec } from '../../shared/child-process/run-process'
+import {
+  runProcess,
+  type ProcessResult,
+  type ProcessSpec
+} from '../../shared/child-process/run-process'
 import { resolveWslInteropSpawnCwd } from '../wsl-interop-spawn-directory'
 import { isUsablePtyTreeMarker, ORCA_PTY_TREE_ID_ENV } from '../pty/wsl-orca-env'
 
@@ -52,7 +56,13 @@ function buildGuestTreeKillScript(): string {
 export function buildWslGuestTreeKillArgs(distro: string, treeId: string): string[] {
   // Why positional, not interpolated: the token never passes through a
   // shell on either side — execFile-style argv on Windows, $1 in the guest.
-  return buildWslExecArgs(distro, ['sh', '-c', buildGuestTreeKillScript(), 'orca-wsl-tree-kill', treeId])
+  return buildWslExecArgs(distro, [
+    'sh',
+    '-c',
+    buildGuestTreeKillScript(),
+    'orca-wsl-tree-kill',
+    treeId
+  ])
 }
 
 export type WslGuestTreeKillRunner = (spec: ProcessSpec) => Promise<ProcessResult>

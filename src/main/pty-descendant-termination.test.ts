@@ -498,6 +498,42 @@ describe('killWithDescendantSweep', () => {
     vi.useRealTimers()
   })
 
+  it('retains a shutdown owner until descendant cleanup finishes after root signalling', async () => {
+    const events: string[] = []
+    let finishDescendants = (): void => {}
+    const completion = new Promise<void>((resolve) => {
+      finishDescendants = resolve
+    })
+    const pending = killWithDescendantSweep(10, () => events.push('root'), {
+      platform: 'linux',
+      readTable: async () => tableCapture([row(10, 1, 10), row(20, 10, 20)]),
+      terminateDescendants: () => {
+        events.push('descendants')
+        return completion
+      },
+      awaitEscalation: true
+    }).then(() => events.push('finished'))
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(events).toEqual(['descendants'])
+    finishDescendants()
+    await pending
+    expect(events).toEqual(['descendants', 'root', 'finished'])
+  })
+
+  it('does not run shutdown cleanup on a tree whose root exited during capture', async () => {
+    const terminateDescendants = vi.fn()
+    const killRoot = vi.fn()
+    await killWithDescendantSweep(10, killRoot, {
+      platform: 'linux',
+      readTable: async () => tableCapture([row(10, 1, 10), row(20, 10, 20)]),
+      ownsRoot: () => false,
+      terminateDescendants
+    })
+    expect(terminateDescendants).not.toHaveBeenCalled()
+    expect(killRoot).toHaveBeenCalledOnce()
+  })
+
   it('signals descendants after snapshot resolution, then kills the root', async () => {
     const events: string[] = []
     const sendSignal = vi.fn(() => events.push('descendant-term'))

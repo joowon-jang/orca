@@ -3,8 +3,10 @@ import type {
   RuntimeMobileSessionAgentTab
 } from '../../../../shared/runtime-types'
 import type { TerminalLayoutSnapshot, TerminalTab } from '../../../../shared/terminal-tab-types'
+import { defaultAgentChatLabel } from '../../../../shared/agent-session-chat-label'
 import { sanitizeTerminalLayoutPaneTitlesForLabels } from '@/lib/terminal-pane-title-sanitization'
 import { resolveTerminalLayoutRoot } from '../remote-terminal-layout-resolution'
+import { retainLocalScrollbackInRemoteLayout } from '@/components/terminal-pane/remote-layout-scrollback-retention'
 import { getRemoteRuntimePtyEnvironmentId } from '../runtime-terminal-stream'
 import {
   HOST_TERMINAL_SURFACE_SEPARATOR,
@@ -20,6 +22,7 @@ import type {
 } from './state'
 import type { Tab } from '../../../../shared/tab-types'
 import { structuredAgentSessionTabId } from '../../../../shared/structured-agent-session-projection'
+import { hasStructuredAgentSessionLaunchCancellationTombstone } from '@/lib/structured-agent-session-launch-registry'
 
 export function isReadyTerminalTab(
   tab: RuntimeMobileSessionTabsResult['tabs'][number]
@@ -59,7 +62,12 @@ export function buildMirroredAgentTabs(
   currentUnifiedTabs: readonly Tab[],
   now: number
 ): MirroredAgentTab[] {
-  const agentTabs = snapshot.tabs.filter(isAgentSessionTab)
+  const agentTabs = snapshot.tabs
+    .filter(isAgentSessionTab)
+    .filter(
+      (tab) =>
+        !hasStructuredAgentSessionLaunchCancellationTombstone(snapshot.worktree, tab.sessionId)
+    )
   const occupiedIds = new Set(currentUnifiedTabs.map((tab) => tab.id))
   const assignedIds = new Set<string>()
   const replacementTabs = new Map<string, Tab>()
@@ -76,9 +84,8 @@ export function buildMirroredAgentTabs(
       currentUnifiedTabs.find(
         (candidate) =>
           !replacementIds.has(candidate.id) &&
-          (candidate.structuredSessionId === tab.replacesSessionId ||
-            (candidate.contentType === 'agent-session' &&
-              candidate.entityId === tab.replacesSessionId))
+          candidate.contentType === 'agent-session' &&
+          candidate.entityId === tab.replacesSessionId
       )
     if (existing) {
       replacementTabs.set(tab.sessionId, existing)
@@ -109,12 +116,18 @@ export function buildMirroredAgentTabs(
       unifiedTab: {
         id: localId,
         entityId: tab.sessionId,
-        groupId: hostGroupIdByTabId.get(tab.id) ?? fallbackGroupId,
+        // Keep the local group while a provisional tab is promoted; host placement can lag the
+        // user's split choice and must not move the mounted pane during adoption.
+        groupId: existing?.groupId ?? hostGroupIdByTabId.get(tab.id) ?? fallbackGroupId,
         worktreeId: snapshot.worktree,
         contentType: 'agent-session',
         agentSessionAgent: tab.agent,
-        label: tab.title.trim() || 'Codex Chat',
-        customLabel: null,
+        // Why: `title` is wire data typed `string`; a host that violates that must
+        // degrade to the placeholder, not throw inside the snapshot patch.
+        label: tab.title?.trim() || defaultAgentChatLabel(tab.agent),
+        // Why: a manual rename lives only on the client; re-nulling it here made
+        // every host snapshot silently discard the user's title.
+        customLabel: existing?.customLabel ?? null,
         color: tab.color !== undefined ? tab.color : (existing?.color ?? null),
         sortOrder: sortOffset + index,
         createdAt: existing?.createdAt ?? now + sortOffset + index,
@@ -187,23 +200,36 @@ export function chooseRemoteTerminalLayout(
       : parentLayout?.expandedLeafId && knownLeafIds.has(parentLayout.expandedLeafId)
         ? parentLayout.expandedLeafId
         : null
-  return {
-    // Why: host parentLayout is authoritative for split direction; else keep the prior client tree, then degenerate — never re-guess a direction.
+  const chatLeafId =
+    parentLayout?.chatLeafId && knownLeafIds.has(parentLayout.chatLeafId)
+      ? parentLayout.chatLeafId
+      : existingLayout?.chatLeafId && knownLeafIds.has(existingLayout.chatLeafId)
+        ? existingLayout.chatLeafId
+        : undefined
+  // Why retained: this rebuilds the layout from the host's picture, and the host publishes no
+  // scrollback of its own — a parked remote pane's bytes live only in the client's copy. Without
+  // this, ANY inventory frame landing between park and reveal drops the only copy: the rebuild is
+  // bufferless, terminalLayoutEqual compares buffers so the write is not bailed out, and
+  // apply-terminal-records assigns it wholesale. Structure still comes from the host; only bytes
+  // for leaves the host itself names are carried over.
+  return retainLocalScrollbackInRemoteLayout(existingLayout, {
+    // Why: host parentLayout is authoritative for split direction; else keep the prior client tree — a leaf-set mismatch prunes/grafts it, never re-guesses the directions it already carries.
     root: resolveTerminalLayoutRoot({
       authoritativeRoot: parentLayout?.root,
       existingRoot: existingLayout?.root,
       leafIds,
       onSynthesize: (leafCount) =>
         console.warn(
-          `[web-session-tabs-sync] synthesized layout for ${leafCount} leaves; no authoritative or prior tree covered them`
+          `[web-session-tabs-sync] synthesized a split direction for ${leafCount} leaves no authoritative or prior tree placed`
         )
     }),
     activeLeafId,
     expandedLeafId,
+    ...(chatLeafId ? { chatLeafId } : {}),
     ptyIdsByLeafId,
     // Why: surface.title is the tab/PTY label, not a pane title; restoring it as one renders a fake title bar. Only host layout titles are real pane titles.
     ...(parentLayout?.titlesByLeafId ? { titlesByLeafId: parentLayout.titlesByLeafId } : {})
-  }
+  })
 }
 
 export function shouldReplaceTerminalTab(
