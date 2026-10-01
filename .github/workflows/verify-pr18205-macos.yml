@@ -1,0 +1,74 @@
+name: Verify PR 18205 on native macOS
+
+on:
+  push:
+    branches: [verify/pr18205-macos]
+    paths:
+      - .github/workflows/verify-pr18205-macos.yml
+      - config/scripts/verify-owned-helper-macos.cjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-pr18205-macos
+  cancel-in-progress: false
+
+jobs:
+  owned-helper-processes:
+    if: github.repository == 'joowon-jang/orca' && github.ref == 'refs/heads/verify/pr18205-macos'
+    runs-on: macos-15
+    timeout-minutes: 10
+    env:
+      ORCA_BACKGROUND_LAUNCH: '1'
+      EXPECTED_SOURCE_SHA: 24009a109a56a942e7d7dfbd9403448f766dc578
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+
+      - name: Verify exact production sources and native host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Darwin
+          test "$(git hash-object src/main/emulator/serve-sim-helper-processes.ts)" = 357219bc50b428971fab7853d0f307ef8a76f5d2
+          test "$(git hash-object src/shared/command-token-scanner.ts)" = 77a6eae8dd129d7f4d8f2155efde474f4a5164d3
+          test "$(git hash-object src/shared/process-output-field-scanner.ts)" = efe64b7eb2540590eb8c55aee2d7e4be7aa0ed58
+          sw_vers
+          uname -m
+          node --version
+          git rev-parse HEAD
+
+      - name: Bundle production helper cleanup without platform adapters
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm exec --yes --package=esbuild@0.25.12 -- esbuild src/main/emulator/serve-sim-helper-processes.ts --bundle --platform=node --format=cjs --outfile="$RUNNER_TEMP/owned-helper.cjs"
+
+      - name: Compare actual macOS helper cleanup and verify fixture removal
+        shell: bash
+        run: |
+          set -euo pipefail
+          node config/scripts/verify-owned-helper-macos.cjs --bundle "$RUNNER_TEMP/owned-helper.cjs" --output "$RUNNER_TEMP/owned-helper-macos.json"
+
+      - name: Record verification evidence
+        if: always()
+        shell: bash
+        run: |
+          if test -f "$RUNNER_TEMP/owned-helper-macos.json"; then
+            cat "$RUNNER_TEMP/owned-helper-macos.json"
+            {
+              echo '### Native macOS helper cleanup evidence'
+              echo '```json'
+              cat "$RUNNER_TEMP/owned-helper-macos.json"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
