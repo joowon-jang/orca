@@ -116,11 +116,32 @@ describe('EmulatorStartLeaseRegistry', () => {
 
     expect(stopHelperForDevice).toHaveBeenCalledWith('emulator-5554', {
       helperPid: undefined,
-      includeOrphaned: true
+      includeOrphaned: false,
+      ownedOnly: true
     })
-    expect(shutdownDevice).toHaveBeenCalledWith('emulator-5554')
+    expect(shutdownDevice).toHaveBeenCalledWith('emulator-5554', { ownedOnly: true })
     await lease.release()
     expect(stopHelperForDevice).toHaveBeenCalledOnce()
+  })
+
+  it('restricts queued cleanup to owned resources when shutdown begins', async () => {
+    const { backend, stopHelperForDevice, shutdownDevice } = makeBackend()
+    const registry = new EmulatorStartLeaseRegistry()
+    const lease = await registry.acquire(backend, 'Pixel_Tablet', () => true)
+    await registry.cleanupWhenIdle(backend, lease.info, () => false, {
+      includeOrphaned: true,
+      shutdownDevice: true
+    })
+    expect(stopHelperForDevice).not.toHaveBeenCalled()
+
+    await registry.shutdown()
+
+    expect(stopHelperForDevice).toHaveBeenCalledWith('emulator-5554', {
+      helperPid: undefined,
+      includeOrphaned: true,
+      ownedOnly: true
+    })
+    expect(shutdownDevice).toHaveBeenCalledWith('emulator-5554', { ownedOnly: true })
   })
 
   it('cleans up a helper that finishes starting after shutdown begins', async () => {
@@ -149,8 +170,8 @@ describe('EmulatorStartLeaseRegistry', () => {
     await shutdown
     expect(stopHelperForDevice).toHaveBeenCalledWith('emulator-5554', {
       helperPid: undefined,
-      includeOrphaned: true
+      ownedOnly: true
     })
-    expect(shutdownDevice).toHaveBeenCalledWith('emulator-5554')
+    expect(shutdownDevice).toHaveBeenCalledWith('emulator-5554', { ownedOnly: true })
   })
 })

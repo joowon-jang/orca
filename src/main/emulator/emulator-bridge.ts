@@ -158,6 +158,7 @@ export class EmulatorBridge {
       (info) => this.sessionRegistry.hasActiveWorktreeForSession(info.deviceUdid),
       {
         includeOrphaned: !options.managedOnly,
+        ownedOnly: options.managedOnly,
         shutdownDevice: options.shutdownDevice
       }
     )

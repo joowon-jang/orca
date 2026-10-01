@@ -57,10 +57,12 @@ export class EmulatorBridgeShutdown {
         backend
           .stopHelperForDevice(session.deviceUdid, {
             helperPid: session.pid,
-            includeOrphaned: true
+            ownedOnly: true
           })
           .catch(() => {})
-          .then(() => backend.shutdownDevice(session.deviceUdid).catch(() => {}))
+          .then(() =>
+            backend.shutdownDevice(session.deviceUdid, { ownedOnly: true }).catch(() => {})
+          )
       )
     }
     const pendingHelperAcquires = Promise.allSettled(this.pendingHelperAcquires)

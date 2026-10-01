@@ -11,6 +11,7 @@ type PendingCleanup = {
   info: EmulatorSessionInfo
   isRegistered: (info: EmulatorSessionInfo) => boolean
   includeOrphaned: boolean
+  ownedOnly: boolean
   shutdownDevice: boolean
 }
 
@@ -106,7 +107,7 @@ export class EmulatorStartLeaseRegistry {
     backend: EmulatorBackend,
     info: EmulatorSessionInfo,
     isRegistered: (info: EmulatorSessionInfo) => boolean,
-    options: { includeOrphaned?: boolean; shutdownDevice?: boolean } = {}
+    options: { includeOrphaned?: boolean; shutdownDevice?: boolean; ownedOnly?: boolean } = {}
   ): Promise<void> {
     this.addPendingCleanup(backend, info, isRegistered, options)
     await this.drainCleanup(backend)
@@ -131,7 +132,7 @@ export class EmulatorStartLeaseRegistry {
     this.activeLeases.delete(lease)
     if (options.cleanupIfUnused) {
       this.addPendingCleanup(lease.backend, lease.info, lease.isRegistered, {
-        includeOrphaned: true,
+        ownedOnly: true,
         shutdownDevice: true
       })
     }
@@ -145,10 +146,10 @@ export class EmulatorStartLeaseRegistry {
     await backend
       .stopHelperForDevice(info.deviceUdid, {
         helperPid: info.helperPid,
-        includeOrphaned: true
+        ownedOnly: true
       })
       .catch(() => {})
-    await backend.shutdownDevice(info.deviceUdid).catch(() => {})
+    await backend.shutdownDevice(info.deviceUdid, { ownedOnly: true }).catch(() => {})
   }
 
   private async drainCleanup(backend: EmulatorBackend): Promise<void> {
@@ -162,18 +163,24 @@ export class EmulatorStartLeaseRegistry {
       return
     }
     const cleanup = Promise.allSettled(
-      [...pending.values()].map(async ({ info, isRegistered, includeOrphaned, shutdownDevice }) => {
-        if (isRegistered(info)) {
-          return
+      [...pending.values()].map(
+        async ({ info, isRegistered, includeOrphaned, ownedOnly, shutdownDevice }) => {
+          if (isRegistered(info)) {
+            return
+          }
+          await backend.stopHelperForDevice(info.deviceUdid, {
+            helperPid: info.helperPid,
+            includeOrphaned,
+            ...(ownedOnly || this.shutdownStarted ? { ownedOnly: true } : {})
+          })
+          if (shutdownDevice) {
+            await backend.shutdownDevice(
+              info.deviceUdid,
+              ownedOnly || this.shutdownStarted ? { ownedOnly: true } : undefined
+            )
+          }
         }
-        await backend.stopHelperForDevice(info.deviceUdid, {
-          helperPid: info.helperPid,
-          includeOrphaned
-        })
-        if (shutdownDevice) {
-          await backend.shutdownDevice(info.deviceUdid)
-        }
-      })
+      )
     )
       .then(() => undefined)
       .finally(() => this.cleanupByBackend.delete(backend))
@@ -185,7 +192,7 @@ export class EmulatorStartLeaseRegistry {
     backend: EmulatorBackend,
     info: EmulatorSessionInfo,
     isRegistered: (info: EmulatorSessionInfo) => boolean,
-    options: { includeOrphaned?: boolean; shutdownDevice?: boolean }
+    options: { includeOrphaned?: boolean; shutdownDevice?: boolean; ownedOnly?: boolean }
   ): void {
     const pending = this.pendingCleanupByBackend.get(backend) ?? new Map()
     const existing = pending.get(info.deviceUdid)
@@ -193,6 +200,7 @@ export class EmulatorStartLeaseRegistry {
       info,
       isRegistered,
       includeOrphaned: options.includeOrphaned === true || existing?.includeOrphaned === true,
+      ownedOnly: options.ownedOnly === true || existing?.ownedOnly === true,
       shutdownDevice: options.shutdownDevice === true || existing?.shutdownDevice === true
     })
     this.pendingCleanupByBackend.set(backend, pending)
