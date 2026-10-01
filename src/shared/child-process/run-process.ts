@@ -2,12 +2,12 @@ import {
   spawn as nodeSpawn,
   spawnSync as nodeSpawnSync,
   type ChildProcess,
-  type ChildProcessWithoutNullStreams,
-  type SpawnOptions as NodeSpawnOptions
+  type ChildProcessWithoutNullStreams
 } from 'node:child_process'
-import { buildWindowsCmdShimCommandLine, isCmdInterpretedProgram } from './windows-command-line'
+import { resolveSpawn } from './spawn-resolution'
 import { forceTerminateProcessTree, signalProcessTree } from './process-tree-termination'
 
+import { hasSpawnObserver, notifySpawnObserver } from './spawn-observer'
 import { createOutputSink } from './bounded-output-sink'
 import { createChildTerminationReporter } from './child-termination-reporter'
 
@@ -19,6 +19,7 @@ export type {
   ProcessResult
 } from './process-spec'
 export { DEFAULT_PROCESS_TIMEOUT_MS, DEFAULT_MAX_OUTPUT_BYTES } from './process-spec'
+export { resolveSpawn, type ResolvedSpawn } from './spawn-resolution'
 import type { ProcessSpec, ProcessResult } from './process-spec'
 import { DEFAULT_PROCESS_TIMEOUT_MS, DEFAULT_MAX_OUTPUT_BYTES } from './process-spec'
 /**
@@ -40,54 +41,6 @@ const PROCESS_EXIT_GRACE_MS = 2_000
  */
 const BARRIER_UNVERIFIED_EXIT_GRACE_MS = 10_000
 
-export type ResolvedSpawn = {
-  file: string
-  args: readonly string[]
-  options: NodeSpawnOptions
-}
-
-/**
- * Translate a spec into the exact `child_process.spawn` call to make.
- *
- * Kept pure and exported so the Windows branch is testable from macOS/Linux:
- * the decisions below are the whole point of this module, and they must not be
- * observable only on the platform that breaks.
- */
-export function resolveSpawn(spec: ProcessSpec, platform: NodeJS.Platform): ResolvedSpawn {
-  const args = spec.args ?? []
-  const base: NodeSpawnOptions = {
-    cwd: spec.cwd,
-    env: spec.env,
-    stdio: spec.stdio ?? ['pipe', 'pipe', 'pipe'],
-    // Why unconditional: Orca's main process is GUI-subsystem and owns no
-    // console, so every console-subsystem child it starts gets a fresh visible
-    // conhost that takes foreground — keystrokes typed into an Orca terminal at
-    // that moment land in the black box instead.
-    windowsHide: true,
-    detached: spec.detached,
-    windowsVerbatimArguments: spec.windowsVerbatimArguments,
-    // Why never `shell: true`: it concatenates arguments without escaping (Node
-    // itself warns DEP0190) and it silently makes windowsHide a no-op.
-    shell: false,
-    ...(spec.terminationBarrier && platform !== 'win32' ? { detached: true } : {})
-  }
-
-  if (platform !== 'win32' || !isCmdInterpretedProgram(spec.program)) {
-    return { file: spec.program, args, options: base }
-  }
-
-  // Node refuses to spawn `.cmd`/`.bat` without a shell (EINVAL, the
-  // CVE-2024-27980 mitigation), so cmd.exe has to be the program. Building the
-  // line ourselves — rather than handing Node `shell: true` — is what keeps the
-  // arguments intact and the console hidden.
-  const comSpec = spec.env?.ComSpec ?? process.env.ComSpec ?? 'cmd.exe'
-  return {
-    file: comSpec,
-    args: [buildWindowsCmdShimCommandLine(spec.program, args)],
-    options: { ...base, windowsVerbatimArguments: true }
-  }
-}
-
 /**
  * Start a child process. Use for long-lived or streaming children.
  *
@@ -98,11 +51,19 @@ export function resolveSpawn(spec: ProcessSpec, platform: NodeJS.Platform): Reso
  */
 export function spawnProcess(spec: ProcessSpec): ChildProcessWithoutNullStreams {
   const resolved = resolveSpawn(spec, process.platform)
-  return nodeSpawn(
+  // Diagnostics only: uv_spawn runs synchronously on the calling thread, so this
+  // brackets the main-thread block for every child started through the wrapper.
+  const spawnStartedAt = hasSpawnObserver() ? performance.now() : null
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: resolveSpawn never sets stdio to 'ignore'/'inherit' for a stream slot, so stdin/stdout/stderr are always pipes.
+  const child = nodeSpawn(
     resolved.file,
     [...resolved.args],
     resolved.options
   ) as ChildProcessWithoutNullStreams
+  if (spawnStartedAt !== null) {
+    notifySpawnObserver(resolved.file, resolved.args, performance.now() - spawnStartedAt)
+  }
+  return child
 }
 
 /**
@@ -186,7 +147,14 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
 
     const resolveFromClose = (code: number | null, signal: NodeJS.Signals | null): void =>
       settle(() =>
-        resolve({ code, signal, stdout: stdout.text(), stderr: stderr.text(), timedOut })
+        resolve({
+          code,
+          signal,
+          stdout: stdout.text(),
+          stderr: stderr.text(),
+          timedOut,
+          outputTruncated: stdout.truncated() || stderr.truncated()
+        })
       )
 
     const settleBarrierOutcome = (): void => {
@@ -381,6 +349,9 @@ export function runProcessSync(spec: ProcessSpec): ProcessResult {
     signal: result.signal,
     stdout: result.stdout?.toString('utf8') ?? '',
     stderr: result.stderr?.toString('utf8') ?? '',
+    // Why always false: spawnSync reports an overrun as an ENOBUFS error, and
+    // the guard above rethrows it, so no truncated result reaches this point.
+    outputTruncated: false,
     // Why ETIMEDOUT and not the signal: a timeout kills with SIGTERM, but so
     // does anything else that terminates the child, and only a timeout also
     // sets this error. Reading the signal alone reports a deliberately

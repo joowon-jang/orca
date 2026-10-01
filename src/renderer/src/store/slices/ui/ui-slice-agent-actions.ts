@@ -2,15 +2,12 @@ import type { UISlice, UISliceGet, UISliceSet } from './ui-slice-contract'
 import { formatAgentTypeLabel, agentKindForAgentType } from '../../../lib/agent-status'
 import {
   deriveRunningAgentSendTargets,
-  resolveRunningAgentSendTarget
+  resolveRunningAgentSendTarget,
+  runningAgentMessageTarget,
+  runningAgentSendTargetAgentType
 } from '../../../lib/running-agent-targets'
 import { translate } from '@/i18n/i18n'
-import {
-  collectAcknowledgedAgentNotificationId,
-  latestAgentTurnTimestamp,
-  resolvePaneKeyWorktreeIdFromTabs,
-  usableTimestamp
-} from './ui-slice-agent-notification-acknowledgement'
+import { createUiActivityActions } from './ui-slice-activity-actions'
 
 let agentSendTargetModeInstanceCounter = 0
 
@@ -39,8 +36,13 @@ export function createUiAgentActions(
   | 'acknowledgedAgentsByPaneKey'
   | 'acknowledgeAgents'
   | 'unacknowledgeAgents'
+  | 'activityClearedAtByPaneKey'
+  | 'applyActivityClearedAt'
+  | 'manuallyUnreadTurnsByPaneKey'
+  | 'clearManuallyUnreadTurns'
 > {
   return {
+    ...createUiActivityActions(set, get),
     sidebarOpen: true,
     sidebarWidth: 280,
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
@@ -123,7 +125,11 @@ export function createUiAgentActions(
       }
 
       const target = resolveRunningAgentSendTarget(get(), mode.worktreeId, paneKey)
-      if (!target || target.status !== 'eligible' || !target.ptyId) {
+      if (
+        !target ||
+        target.status !== 'eligible' ||
+        (target.kind === 'terminal' && !target.ptyId)
+      ) {
         // Why: eligibility can drop after the menu opened; keep the picker open (row title explains) rather than adding toast noise.
         return false
       }
@@ -142,13 +148,16 @@ export function createUiAgentActions(
           : s
       )
 
-      const label = formatAgentTypeLabel(target.entry.agentType)
-      const { activeAgentNotesSendFailureMessage, sendNotesToActiveAgentSession } =
-        await import('@/lib/active-agent-note-send')
-      const result = await sendNotesToActiveAgentSession({
+      const agentType = runningAgentSendTargetAgentType(target)
+      const label = formatAgentTypeLabel(agentType)
+      const [{ activeAgentNotesSendFailureMessage }, { sendMessageToAgent }] = await Promise.all([
+        import('@/lib/active-agent-note-send'),
+        import('@/lib/agent-message-send')
+      ])
+      const result = await sendMessageToAgent({
         worktreeId: mode.worktreeId,
         prompt: mode.prompt,
-        noteTarget: { tabId: target.tabId, leafId: target.leafId }
+        target: runningAgentMessageTarget(target)
       }).catch(() => {
         console.error('Failed to send notes to sidebar agent target:', {
           code: 'runtime-unverifiable'
@@ -200,7 +209,7 @@ export function createUiAgentActions(
         import('@/lib/telemetry')
       ])
       track('agent_prompt_sent', {
-        agent_kind: agentKindForAgentType(target.entry.agentType),
+        agent_kind: agentKindForAgentType(agentType),
         launch_source: mode.launchSource,
         request_kind: 'followup'
       })
@@ -209,97 +218,6 @@ export function createUiAgentActions(
       )
       get().closeAgentSendPopoverTargetMode(mode.id, mode.instanceId)
       return true
-    },
-
-    acknowledgedAgentsByPaneKey: {},
-    acknowledgeAgents: (paneKeys) => {
-      const notificationIdsToDismiss = new Set<string>()
-      set((s) => {
-        if (paneKeys.length === 0) {
-          return s
-        }
-        const now = Date.now()
-        const migrationUnsupported = Object.values(s.migrationUnsupportedByPtyId ?? {})
-        // Why: only reallocate if an ack advances; compare prev<stamp not !== — the stamp ticks every ms and !== would rewrite the map every call.
-        let next: Record<string, number> | null = null
-        // Why: one ack, two records — leaving the completion marker set keeps the tab dot,
-        // the ⌘J row and the floating-workspace dot lit with nothing left to read.
-        let nextUnreadCompletions: Record<string, true> | null = null
-        for (const key of paneKeys) {
-          if (s.unreadAgentCompletionPanes[key]) {
-            if (nextUnreadCompletions === null) {
-              nextUnreadCompletions = { ...s.unreadAgentCompletionPanes }
-            }
-            delete nextUnreadCompletions[key]
-          }
-          const prev = s.acknowledgedAgentsByPaneKey[key] ?? 0
-          // Why not plain Date.now(): a remote/SSH execution host can stamp a turn ahead of this clock,
-          // and every unread rule is `ackAt < turnTimestamp`. A behind-the-turn ack can never clear the
-          // row, so its auto-ack effect re-fires on each new millisecond forever (React #185).
-          let stamp = now
-          const liveEntry = s.agentStatusByPaneKey?.[key]
-          if (liveEntry) {
-            collectAcknowledgedAgentNotificationId({
-              ids: notificationIdsToDismiss,
-              worktreeId: resolvePaneKeyWorktreeIdFromTabs(s, key) ?? liveEntry.worktreeId,
-              paneKey: key,
-              stateStartedAt: liveEntry.stateStartedAt,
-              previousAckAt: prev
-            })
-            stamp = Math.max(stamp, latestAgentTurnTimestamp(liveEntry))
-          }
-          const retained = s.retainedAgentsByPaneKey?.[key]
-          if (retained) {
-            collectAcknowledgedAgentNotificationId({
-              ids: notificationIdsToDismiss,
-              worktreeId: retained.worktreeId,
-              paneKey: key,
-              stateStartedAt: retained.entry.stateStartedAt,
-              previousAckAt: prev
-            })
-            stamp = Math.max(stamp, latestAgentTurnTimestamp(retained.entry))
-          }
-          for (const unsupported of migrationUnsupported) {
-            // Why: Activity synthesizes a blocked row from this entry, stamped by the pane's host like any turn.
-            if (unsupported.paneKey === key) {
-              stamp = Math.max(stamp, usableTimestamp(unsupported.updatedAt))
-            }
-          }
-          if (prev < stamp) {
-            if (next === null) {
-              next = { ...s.acknowledgedAgentsByPaneKey }
-            }
-            next[key] = stamp
-          }
-        }
-        if (!next && !nextUnreadCompletions) {
-          return s
-        }
-        return {
-          ...(next ? { acknowledgedAgentsByPaneKey: next } : {}),
-          ...(nextUnreadCompletions ? { unreadAgentCompletionPanes: nextUnreadCompletions } : {})
-        }
-      })
-      const notificationIds = [...notificationIdsToDismiss]
-      if (notificationIds.length > 0 && typeof window !== 'undefined') {
-        void window.api?.notifications?.dismiss?.(notificationIds)
-      }
-    },
-    unacknowledgeAgents: (paneKeys) =>
-      set((s) => {
-        if (paneKeys.length === 0) {
-          return s
-        }
-        let next: Record<string, number> | null = null
-        for (const key of paneKeys) {
-          if (s.acknowledgedAgentsByPaneKey[key] !== undefined) {
-            if (next === null) {
-              next = { ...s.acknowledgedAgentsByPaneKey }
-            }
-            delete next[key]
-          }
-        }
-        return next ? { acknowledgedAgentsByPaneKey: next } : s
-      })
+    }
   }
 }

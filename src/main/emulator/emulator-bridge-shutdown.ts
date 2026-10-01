@@ -55,7 +55,10 @@ export class EmulatorBridgeShutdown {
       }
       promises.push(
         backend
-          .stopHelperForDevice(session.deviceUdid, { helperPid: session.pid, includeOrphaned: true })
+          .stopHelperForDevice(session.deviceUdid, {
+            helperPid: session.pid,
+            includeOrphaned: true
+          })
           .catch(() => {})
           .then(() => backend.shutdownDevice(session.deviceUdid).catch(() => {}))
       )

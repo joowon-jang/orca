@@ -1,9 +1,10 @@
+import type { SecretAtRestProtection } from '../../shared/secret-at-rest-protection'
 import type {
   ClaudeRateLimitAccountsState,
   CodexRateLimitAccountsState
 } from '../../shared/managed-account-types'
 import type { CodexConfigSyncStatus } from '../../shared/codex-config-sync-types'
-import type { GrokAccountStatus } from '../../shared/rate-limit-types'
+import type { CursorAccountStatus, GrokAccountStatus } from '../../shared/rate-limit-types'
 
 export type CodexAccountsApi = {
   list: () => Promise<CodexRateLimitAccountsState>
@@ -11,6 +12,10 @@ export type CodexAccountsApi = {
     runtime?: 'host' | 'wsl'
     wslDistro?: string | null
   }) => Promise<CodexRateLimitAccountsState>
+  cancelPendingLogin: () => Promise<boolean>
+  /** Sign-in link of the login waiting on a browser, or null when none is. */
+  getPendingLoginUrl: () => Promise<string | null>
+  onPendingLoginUrlChanged: (callback: (url: string | null) => void) => () => void
   reauthenticate: (args: {
     accountId: string
     /** Local-only: activate the re-authed account when its runtime lane had no selection. */
@@ -58,10 +63,37 @@ export type GrokAccountsApi = {
   getStatus: () => Promise<GrokAccountStatus>
 }
 
+export type CursorAccountsApi = {
+  getStatus: () => Promise<CursorAccountStatus>
+}
+
 export type MinimaxCredentialsApi = {
-  getStatus: () => Promise<{ configured: boolean }>
-  saveCookie: (cookie: string) => Promise<{ configured: boolean }>
-  clearCookie: () => Promise<{ configured: boolean }>
+  // Why: cookie + API key each live in their own safeStorage file, so the
+  // status separates them. 'configured' stays as the OR so existing callers
+  // that only care about "anything saved" keep working unchanged.
+  getStatus: () => Promise<{
+    configured: boolean
+    cookieConfigured: boolean
+    apiKeyConfigured: boolean
+    cookieProtection: SecretAtRestProtection | null
+    apiKeyProtection: SecretAtRestProtection | null
+  }>
+  saveCookie: (cookie: string) => Promise<{
+    cookieConfigured: boolean
+    cookieProtection: SecretAtRestProtection | null
+  }>
+  clearCookie: () => Promise<{
+    cookieConfigured: boolean
+    cookieProtection: SecretAtRestProtection | null
+  }>
+  saveApiKey: (key: string) => Promise<{
+    apiKeyConfigured: boolean
+    apiKeyProtection: SecretAtRestProtection | null
+  }>
+  clearApiKey: () => Promise<{
+    apiKeyConfigured: boolean
+    apiKeyProtection: SecretAtRestProtection | null
+  }>
 }
 
 export type CodexConfigSyncApi = {

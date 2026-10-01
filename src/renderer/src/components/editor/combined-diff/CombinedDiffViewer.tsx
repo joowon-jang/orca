@@ -11,6 +11,8 @@ import {
   EMPTY_GIT_STATUS_ENTRIES,
   useCombinedDiffEntrySet
 } from './resolve-changes/use-combined-diff-entry-set'
+import { useCombinedDiffSectionIndexMap } from './resolve-changes/use-combined-diff-section-index-map'
+import { useCombinedDiffSectionRowKeys } from './resolve-changes/use-combined-diff-section-row-keys'
 import { useCombinedDiffSectionLoadRegistry } from './load-sections/combined-diff-section-load-registry'
 import { useCombinedDiffSectionLoader } from './load-sections/use-combined-diff-section-loader'
 import { useCombinedDiffSectionRetry } from './load-sections/use-combined-diff-section-retry'
@@ -36,6 +38,7 @@ import {
 import { useCombinedDiffNotesActions } from './review-controls/use-combined-diff-notes-actions'
 import { useCombinedDiffSectionActions } from './review-controls/use-combined-diff-section-actions'
 import { useCombinedDiffViewPreferences } from './review-controls/use-combined-diff-view-preferences'
+import { useDocumentDarkTheme } from '@/hooks/use-document-dark-theme'
 
 export default function CombinedDiffViewer({
   file,
@@ -62,9 +65,7 @@ export default function CombinedDiffViewer({
   )
   const activeGroupId = useAppStore((s) => s.activeGroupIdByWorktree[file.worktreeId])
   const canOpenWorkspaceFileBrowserForPath = useWorkspaceFileBrowserActionPredicate(file.worktreeId)
-  const isDark =
-    settings?.theme === 'dark' ||
-    (settings?.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  const isDark = useDocumentDarkTheme()
 
   const [sections, setSections] = useState<DiffSection[]>([])
   const [sectionHeights, setSectionHeights] = useState<Record<number, number>>({})
@@ -120,6 +121,13 @@ export default function CombinedDiffViewer({
     setSections
   })
 
+  // Why: one incremental scan of `sections` feeds the virtualizer keys, the restore signal and the
+  // toolbar collapse state, instead of three independent full passes per loaded section.
+  const sectionRowKeys = useCombinedDiffSectionRowKeys({ generation, sections })
+  const sectionIndexByKey = useCombinedDiffSectionIndexMap({
+    entrySignature: entrySet.entrySignature,
+    sections
+  })
   const { hasDirectScrollInput, markDirectScrollInput } = useCombinedDiffDirectScrollInput()
   const { cleanupActiveScrollbarDrag, handleScrollbarPointerDown, scrollThumb, updateScrollbar } =
     useCombinedDiffScrollbar({ markDirectScrollInput, scrollContainerRef })
@@ -127,6 +135,7 @@ export default function CombinedDiffViewer({
     generation,
     programmaticScrollMarks,
     renderedIndicesRef: registry.renderedIndicesRef,
+    rowKeys: sectionRowKeys.rowKeys,
     scrollContainerRef,
     scrollOffsetRef: restore.scrollOffsetRef,
     sectionHeights,
@@ -142,9 +151,11 @@ export default function CombinedDiffViewer({
     scrollAnchorRef: restore.scrollAnchorRef,
     scrollContainerRef,
     scrollOffsetRef: restore.scrollOffsetRef,
+    sectionIndexByKey,
     sections,
     sectionsRef: registry.sectionsRef,
     sideBySide: preferences.sideBySide,
+    structureRevision: sectionRowKeys.structureRevision,
     totalSize: virtualizer.getTotalSize(),
     viewStateKey,
     virtualizer
@@ -168,6 +179,7 @@ export default function CombinedDiffViewer({
     entrySignature: entrySet.entrySignature,
     markDirectScrollInput,
     scrollToIndex: anchors.scrollToSectionIndex,
+    sectionIndexByKey,
     sections,
     sectionsRef: registry.sectionsRef,
     toggleSection,
@@ -297,7 +309,7 @@ export default function CombinedDiffViewer({
         skippedConflicts={skippedConflicts!}
       />
     ) : null
-  const allSectionsCollapsed = sections.every((section) => section.collapsed)
+  const allSectionsCollapsed = sectionRowKeys.allSectionsCollapsed
 
   return (
     <>
@@ -335,6 +347,7 @@ export default function CombinedDiffViewer({
           <CombinedDiffFileTree
             mode={entrySet.treeMode}
             worktreePath={file.filePath}
+            sourceWorkspaceId={file.worktreeId}
             entries={entrySet.entries}
             sectionIndexByKey={treeNavigation.sectionIndexByKey}
             activeSectionKey={treeNavigation.activeTreeSectionKey}

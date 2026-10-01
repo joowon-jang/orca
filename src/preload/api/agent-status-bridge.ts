@@ -1,5 +1,6 @@
 import { ipcRenderer } from 'electron'
 import type {
+  AgentStatusCacheIdentity,
   AgentStatusClearIpcPayload,
   AgentStatusIpcPayload,
   MigrationUnsupportedPtyEntry
@@ -27,6 +28,8 @@ export const agentStatusApi = {
     ipcRenderer.invoke('agentStatus:getSnapshot'),
   inferInterrupt: (request: AgentInterruptInferenceRequest): Promise<boolean> =>
     ipcRenderer.invoke('agentStatus:inferInterrupt', request),
+  hasVerifiableAgentProcess: (paneKey: string): Promise<boolean> =>
+    ipcRenderer.invoke('agentStatus:hasVerifiableAgentProcess', paneKey),
   inferQuestionAnswered: (request: AgentQuestionAnsweredInferenceRequest): Promise<boolean> =>
     ipcRenderer.invoke('agentStatus:inferQuestionAnswered', request),
   onMigrationUnsupported: (
@@ -66,6 +69,12 @@ export const agentStatusApi = {
   drop: (paneKey: string): void => {
     ipcRenderer.send('agentStatus:drop', paneKey)
   },
+  dropPersisted: (identity: AgentStatusCacheIdentity): void => {
+    ipcRenderer.send('agentStatus:dropPersisted', identity)
+  },
+  dropPersistedBatch: (identities: readonly AgentStatusCacheIdentity[]): void => {
+    ipcRenderer.send('agentStatus:dropPersistedBatch', identities)
+  },
   reconcileEndedProcess: (paneKey: string): void => {
     ipcRenderer.send('agentStatus:reconcileEndedProcess', paneKey)
   },
@@ -73,8 +82,8 @@ export const agentStatusApi = {
   dropByTabPrefix: (tabId: string): void => {
     ipcRenderer.send('agentStatus:dropByTabPrefix', tabId)
   },
-  retirePaneAuthority: (paneKey: string): void => {
-    ipcRenderer.send('agentStatus:retirePaneAuthority', paneKey)
+  retirePaneAuthority: (paneKey: string, retirementId?: string): void => {
+    ipcRenderer.send('agentStatus:retirePaneAuthority', paneKey, retirementId)
   },
   restorePaneAuthority: (paneKey: string): void => {
     ipcRenderer.send('agentStatus:restorePaneAuthority', paneKey)

@@ -17,10 +17,6 @@ describe('SshPtyProvider', () => {
     provider = new SshPtyProvider('conn-1', mux as never)
   })
 
-  it('returns the connectionId', () => {
-    expect(provider.getConnectionId()).toBe('conn-1')
-  })
-
   it('reports that SSH panes cannot restore from authoritative provider snapshots', () => {
     expect(provider.canProvideAuthoritativeBufferSnapshot(scopedPty1)).toBe(false)
   })
@@ -236,6 +232,13 @@ describe('SshPtyProvider', () => {
     expectRequest(mux.request, 'pty.clearBuffer', { id: 'pty-1' })
   })
 
+  it('pushes host colours as a notification an older relay can ignore', () => {
+    const colors = { foreground: '#ffffff', background: '#282c34' }
+    provider.setColorQueryReplyColors(colors)
+    expect(mux.notify).toHaveBeenCalledWith('pty.setColorQueryReplyColors', { colors })
+    expect(mux.request).not.toHaveBeenCalledWith('pty.setColorQueryReplyColors', expect.anything())
+  })
+
   it('acknowledgeDataEvent sends pty.ackData notification', () => {
     provider.acknowledgeDataEvent(scopedPty1, 1024)
     expect(mux.notify).toHaveBeenCalledWith('pty.ackData', { id: 'pty-1', charCount: 1024 })
@@ -255,16 +258,41 @@ describe('SshPtyProvider', () => {
     expectRequest(mux.request, 'pty.getForegroundProcess', { id: 'pty-1' })
   })
 
-  it('preserves unavailable process inspection', async () => {
+  it('preserves client-only unverifiable process inspection', async () => {
     const inspection = {
       foregroundProcess: null,
-      hasChildProcesses: true,
-      unavailable: true as const
+      hasChildProcesses: false,
+      verdict: 'unverifiable' as const,
+      reason: 'transport_loss' as const
     }
     mux.request.mockResolvedValue(inspection)
 
     await expect(provider.inspectProcess(scopedPty1)).resolves.toEqual(inspection)
     expectRequest(mux.request, 'pty.inspectProcess', { id: 'pty-1' })
+  })
+
+  it('forwards the expected incarnation for fenced remote inspection', async () => {
+    const inspection = {
+      foregroundProcess: 'codex',
+      hasChildProcesses: true,
+      foregroundProcessEvidence: { verdict: 'live' }
+    }
+    mux.request.mockResolvedValue(inspection)
+
+    await expect(
+      provider.inspectProcess(scopedPty1, { expectedIncarnationId: 'incarnation-1' })
+    ).resolves.toEqual(inspection)
+    expectRequest(mux.request, 'pty.inspectProcess', {
+      id: 'pty-1',
+      expectedIncarnationId: 'incarnation-1'
+    })
+  })
+
+  it('probes the additive foreground-evidence capability', async () => {
+    mux.request.mockResolvedValue({ foregroundProcessEvidenceVersion: 1 })
+
+    await expect(provider.supportsForegroundProcessEvidence()).resolves.toBe(true)
+    expectRequest(mux.request, 'pty.getCapabilities', undefined, { timeoutMs: 5_000 })
   })
 
   it('serializes scoped app ids using raw relay ids', async () => {

@@ -10,6 +10,7 @@ import {
   prepareWslLinkedWorktreeGitRouting
 } from '../wsl-linked-worktree-git-routing'
 import { resolveCommand, type ResolvedCommand } from './wsl-command-resolution'
+import { annotateWslHostFailure } from './wsl-host-failure'
 import type { GitAdmissionTier, GitExecOptions } from './git-exec-options'
 import { execFileCapture, execFileCaptureToTermination } from './exec-file-capture'
 import {
@@ -64,13 +65,15 @@ async function gitExecFileAsyncUnlocked(
       const policy = effectiveOptions.useConfiguredSshCommandForNetwork
         ? await buildNetworkSshPolicyEnv(effectiveOptions)
         : { env: nonInteractiveGitEnv(effectiveOptions.env), mode: 'default' as const }
-      const grant = await acquireGitAdmission({
-        args,
-        cwd: options.cwd,
-        wslDistro: options.wslDistro,
-        tier: options.admissionTier,
-        signal: options.signal
-      })
+      const grant = options.admissionExempt
+        ? { queueWaitMs: 0, release: () => {} }
+        : await acquireGitAdmission({
+            args,
+            cwd: options.cwd,
+            wslDistro: options.wslDistro,
+            tier: options.admissionTier,
+            signal: options.signal
+          })
       span?.setAttribute('git.queue_wait_ms', grant.queueWaitMs)
       const timeoutMs = gitCommandTimeoutMs(args, options.timeout, options.timeoutMsForTest)
       const terminationState: { current: Promise<void> | null } = { current: null }
@@ -96,7 +99,7 @@ async function gitExecFileAsyncUnlocked(
             ? {}
             : { createTimeoutError: () => new GitCommandTimeoutError(timeoutMs) })
         }
-        return options.terminationBarrier
+        const captured = options.terminationBarrier
           ? execFileCaptureToTermination(
               command.binary,
               command.args,
@@ -104,6 +107,10 @@ async function gitExecFileAsyncUnlocked(
               command.termination
             )
           : execFileCapture(command.binary, command.args, captureOptions)
+        // Why: a dead WSL distro fails with an empty stderr, so the span would carry no cause at all.
+        return captured.catch((error: unknown) => {
+          throw annotateWslHostFailure(error, command)
+        })
       }
       const runCapturedCommand = async (): Promise<{ stdout: string; stderr: string }> => {
         let result: { stdout: string | Buffer; stderr: string | Buffer }

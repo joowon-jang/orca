@@ -1,6 +1,7 @@
 // @ts-nocheck -- mechanically split from OrcaRuntimeService; behavior is covered by AST equivalence and characterization tests.
 import { OrcaRuntimeWithEmitDaemonPtyTransientFact } from './orca-runtime-emit-daemon-pty-transient-fact'
-import { getDecorativeAgentTitleSignature } from '../../shared/agent-decorative-title-signature'
+import { getDecorativeTitleGateKey } from '../../shared/agent-decorative-title-signature'
+import { shouldEmitTitleFactForFrame } from './decorative-title-fact-emission'
 import type { RuntimePtyTitleTrackerEntry } from './runtime-terminal-state-records'
 import { createTerminalTitleTracker } from '../../shared/terminal-output-side-effects'
 import { detectAgentStatusFromTitle } from '../../shared/agent-detection'
@@ -36,11 +37,7 @@ export class OrcaRuntimeWithGetUnpersistedTrackedTitleForPty extends OrcaRuntime
 
   /** Decorative comparison key: only recognized agent titles fold leading spinner frames. */
   protected makeDecorativeTitleGateKey(rawTitle: string, normalizedTitle: string): string {
-    // Stable Pi/Gemini/Grok display normalization also defines their semantic gate.
-    const normalizedSignature =
-      rawTitle === normalizedTitle ? null : getDecorativeAgentTitleSignature(normalizedTitle)
-    const signature = normalizedSignature ?? getDecorativeAgentTitleSignature(rawTitle)
-    return signature === null ? `literal\u0000${normalizedTitle}` : `agent\u0000${signature}`
+    return getDecorativeTitleGateKey(rawTitle, normalizedTitle)
   }
 
   protected getOrCreatePtyTitleTrackerEntry(ptyId: string): RuntimePtyTitleTrackerEntry {
@@ -64,20 +61,39 @@ export class OrcaRuntimeWithGetUnpersistedTrackedTitleForPty extends OrcaRuntime
     const tracker = createTerminalTitleTracker(
       {
         onTitle: (normalizedTitle, rawTitle, meta) => {
-          this.recordTerminalSideEffectFact(ptyId, {
-            kind: 'title',
-            normalizedTitle,
-            rawTitle,
-            ...(meta?.staleWorkingTitleClear ? { staleWorkingTitleClear: true } : {})
-          })
-          const changed = this.applyTrackedPtyTitle(ptyId, rawTitle, normalizedTitle, meta)
-          const identityOnlyTitle = this.isLiveCursorNativeTitle(rawTitle, meta)
           const live = this.ptyTitleTrackersByPtyId.get(ptyId)
           const gateKey = this.makeDecorativeTitleGateKey(rawTitle, normalizedTitle)
           const decorativeOnly = live?.lastMobileTitleGateKey === gateKey
+          if (!decorativeOnly && !meta?.staleWorkingTitleClear) {
+            void this.recheckHookAgentPresenceForPty(ptyId)
+          }
           if (live) {
             live.lastMobileTitleGateKey = gateKey
           }
+          // Why: the same gate the mobile fan-out below already uses, applied one hop earlier —
+          // a spinner frame the renderer store discards should not cost a pty:sideEffect message
+          // at all. See decorative-title-fact-emission.ts for why repeats still heartbeat.
+          const nowMs = Date.now()
+          if (
+            shouldEmitTitleFactForFrame({
+              decorativeOnly,
+              staleWorkingTitleClear: meta?.staleWorkingTitleClear === true,
+              lastEmittedAtMs: live?.lastTitleFactAtMs ?? null,
+              nowMs
+            })
+          ) {
+            if (live) {
+              live.lastTitleFactAtMs = nowMs
+            }
+            this.recordTerminalSideEffectFact(ptyId, {
+              kind: 'title',
+              normalizedTitle,
+              rawTitle,
+              ...(meta?.staleWorkingTitleClear ? { staleWorkingTitleClear: true } : {})
+            })
+          }
+          const changed = this.applyTrackedPtyTitle(ptyId, rawTitle, normalizedTitle, meta)
+          const identityOnlyTitle = this.isLiveCursorNativeTitle(rawTitle, meta)
           const tracksReplicatedStatus =
             live?.applyingChunk === true && this.mobileSessionTabListeners.size > 0
           const titleStatus = tracksReplicatedStatus ? detectAgentStatusFromTitle(rawTitle) : null
@@ -126,9 +142,14 @@ export class OrcaRuntimeWithGetUnpersistedTrackedTitleForPty extends OrcaRuntime
         onAgentExited: () => {
           this.confirmPtyAgentExit(ptyId)
         },
+        onCommandStarted: () => {
+          this.openCodeRunLifetime.onCommandStarted(ptyId)
+        },
         onCommandFinished: (exitCode: number | null) => {
+          void this.recheckHookAgentPresenceForPty(ptyId)
           this.retirePtyAgentLaunchAuthority(ptyId)
           this.recordTerminalSideEffectFact(ptyId, { kind: 'command-finished', exitCode })
+          this.openCodeRunLifetime.onCommandFinished(ptyId, exitCode)
         },
         onBell: () => {
           this.recordTerminalSideEffectFact(ptyId, { kind: 'bell' })
@@ -151,8 +172,10 @@ export class OrcaRuntimeWithGetUnpersistedTrackedTitleForPty extends OrcaRuntime
       tracker,
       applyingChunk: false,
       lastMobileTitleGateKey: null,
+      lastTitleFactAtMs: null,
       chunkTouchedSessionTabs: false,
       pendingFacts: [],
+      afterFacts: [],
       // Why: command-code facts exist only for the pty:sideEffect channel —
       // headless serve skips the per-chunk scrape entirely. The detector
       // self-arms on the Command Code banner; the spawn command (when main

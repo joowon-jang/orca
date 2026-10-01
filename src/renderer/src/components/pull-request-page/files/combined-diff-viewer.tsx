@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { editor as monacoEditor } from 'monaco-editor'
 import { useAppStore } from '@/store'
+import { useDocumentDarkTheme } from '@/hooks/use-document-dark-theme'
 import { DiffSectionItem } from '@/components/editor/DiffSectionItem'
 import { CombinedDiffFileTree } from '../../editor/combined-diff/browse-files/combined-diff-file-tree'
-import { createCombinedDiffSectionIndexMap } from '../../editor/combined-diff/resolve-changes/combined-diff-section-identity'
+import { useCombinedDiffSectionIndexMap } from '../../editor/combined-diff/resolve-changes/use-combined-diff-section-index-map'
 import { handleCombinedDiffFileTreeNavigation } from '../../editor/combined-diff/browse-files/combined-diff-file-tree-navigation'
 import { getDiffSectionRowEstimatedHeight } from '@/components/editor/diff-section-layout'
 import type { DiffSection } from '@/components/editor/diff-section-types'
@@ -45,9 +46,7 @@ export function PRFilesCombinedDiffViewer({
   onViewedChange
 }: PRFilesCombinedDiffViewerProps): React.JSX.Element {
   const settings = useAppStore((s) => s.settings)
-  const isDark =
-    settings?.theme === 'dark' ||
-    (settings?.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  const isDark = useDocumentDarkTheme()
   const diffEntrySignature = useMemo(
     () =>
       JSON.stringify(
@@ -71,6 +70,12 @@ export function PRFilesCombinedDiffViewer({
     [diffEntrySignature]
   )
   const fileByPath = useMemo(() => new Map(files.map((file) => [file.path, file])), [files])
+  // Why: an inline arrow here re-keys every mounted row's comment decorator on every render.
+  const getCommentableLineNumbers = useCallback(
+    (section: DiffSection): readonly number[] | undefined =>
+      fileByPath.get(section.path)?.reviewCommentLineNumbers,
+    [fileByPath]
+  )
   const inlineReviewComments = useMemo(
     () => buildInlineReviewComments(comments, repoId, prNumber),
     [comments, prNumber, repoId]
@@ -180,7 +185,7 @@ export function PRFilesCombinedDiffViewer({
     })
 
   const allSectionsCollapsed = sections.length > 0 && sections.every((section) => section.collapsed)
-  const sectionIndexByKey = useMemo(() => createCombinedDiffSectionIndexMap(sections), [sections])
+  const sectionIndexByKey = useCombinedDiffSectionIndexMap({ entrySignature, sections })
   const visibleActiveTreeSectionKey =
     activeTreeSectionKey && sectionIndexByKey.has(activeTreeSectionKey)
       ? activeTreeSectionKey
@@ -358,9 +363,7 @@ export function PRFilesCombinedDiffViewer({
                     onAddLineComment={handleAddLineComment}
                     addLineCommentLabel="Comment"
                     addLineCommentPlaceholder="Add a review comment"
-                    getCommentableLineNumbers={(current) =>
-                      fileByPath.get(current.path)?.reviewCommentLineNumbers
-                    }
+                    getCommentableLineNumbers={getCommentableLineNumbers}
                     setSectionHeights={setSectionHeights}
                     setSections={setSections}
                     modifiedEditorsRef={modifiedEditorsRef}

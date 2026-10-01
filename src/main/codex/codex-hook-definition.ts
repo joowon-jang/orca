@@ -1,13 +1,12 @@
 import { join } from 'node:path'
 import {
   getSharedManagedScriptPath,
-  wrapPosixHookCommand,
-  wrapWindowsCmdHookCommand,
   writeHooksJson,
   type HookDefinition
 } from '../agent-hooks/installer-utils'
 import { POSIX_HOOK_STDIN_DRAIN_COMMAND } from '../agent-hooks/hook-stdin-contract'
 import { getOrcaManagedCodexHomePath, getSystemCodexHomePath } from './codex-home-paths'
+import { buildCodexHookCommand } from './codex-hook-command-form'
 import { CODEX_HOOK_EVENT_LABEL, getCodexManagedScriptFileName } from './codex-hook-identity'
 import { getManagedScript } from './codex-hook-script'
 import type { CodexEventLabel } from './config-toml-trust'
@@ -70,9 +69,7 @@ export function getManagedScriptPath(): string {
 }
 
 export function getManagedCommand(scriptPath: string): string {
-  return process.platform === 'win32'
-    ? wrapWindowsCmdHookCommand(scriptPath)
-    : wrapPosixHookCommand(scriptPath)
+  return buildCodexHookCommand(scriptPath)
 }
 
 export type CodexManagedHookInstallMaterial = {

@@ -11,7 +11,6 @@ import type {
 } from '../../shared/agent-session-host-authority'
 import { canonicalizeAgentSessionIdentity } from './agent-session-claim-identity'
 import { isTuiAgentEnabled } from '../../shared/tui-agent-selection'
-import { repoIsRemote } from '../../shared/agent-launch-remote'
 import { resolveLocalWindowsAgentStartupShell } from '../../shared/windows-terminal-shell'
 import { buildAgentResumeStartupPlan } from '../../shared/tui-agent-startup'
 import {
@@ -88,8 +87,7 @@ export class OrcaRuntimeWithGetAgentSessionExecutionNamespace extends OrcaRuntim
 
   async ensureAgentSession(
     request: RuntimeEnsureAgentSessionRequest,
-    _caller: RuntimeAgentSessionRpcCaller = {},
-    handoffAuthority?: { spawnToken: string; providerRoot: string; sessionId: string }
+    _caller: RuntimeAgentSessionRpcCaller = {}
   ): Promise<RuntimeEnsureAgentSessionResult> {
     if (request.kind === 'automatic') {
       // Legacy renderer sleep records are migration evidence, not host authority.
@@ -99,11 +97,7 @@ export class OrcaRuntimeWithGetAgentSessionExecutionNamespace extends OrcaRuntim
       throw new Error('runtime_unavailable')
     }
     const workspace = await this.resolveTerminalWorkspaceLaunchScope(request.worktree)
-    const resolvedNamespace = this.getAgentSessionExecutionNamespace(workspace, request.agent)
-    const namespace =
-      resolvedNamespace && handoffAuthority
-        ? { ...resolvedNamespace, providerRoot: handoffAuthority.providerRoot }
-        : resolvedNamespace
+    const namespace = this.getAgentSessionExecutionNamespace(workspace, request.agent)
     if (
       !namespace ||
       !(await this.executionOwnerSupportsAgentSessionOperation(workspace, 'resume', _caller.signal))
@@ -123,7 +117,9 @@ export class OrcaRuntimeWithGetAgentSessionExecutionNamespace extends OrcaRuntim
       throw new Error('Selected agent is disabled. Choose an enabled agent before resuming.')
     }
     const platform = this.getAgentLaunchPlatformForWorkspace(workspace)
-    const isRemote = workspace.repo ? repoIsRemote(workspace.repo) : Boolean(workspace.connectionId)
+    // Why: `workspace.repo` is display metadata and may be a row from another host; the launch
+    // shape must match the PTY route this scope already resolved.
+    const isRemote = Boolean(workspace.connectionId)
     const shell = resolveLocalWindowsAgentStartupShell({
       platform,
       isRemote,
@@ -137,16 +133,10 @@ export class OrcaRuntimeWithGetAgentSessionExecutionNamespace extends OrcaRuntim
         request.agentArgs !== undefined
           ? request.agentArgs
           : resolveTuiAgentLaunchArgs(request.agent, settings.agentDefaultArgs),
-      agentEnv: {
-        ...resolveTuiAgentLaunchEnv(request.agent, settings.agentDefaultEnv),
-        ...(handoffAuthority && request.agent === 'codex'
-          ? { CODEX_HOME: handoffAuthority.providerRoot }
-          : handoffAuthority && request.agent === 'claude'
-            ? { CLAUDE_CONFIG_DIR: handoffAuthority.providerRoot }
-            : {})
-      },
+      agentEnv: resolveTuiAgentLaunchEnv(request.agent, settings.agentDefaultEnv),
       ompResumeFilePath: request.ompResumeFilePath,
       sessionOptions: this.toAgentSessionOptions(request.launchPreferences),
+      sessionOptionsOverrideAgentArgs: Boolean(request.launchPreferences),
       platform,
       shell,
       isRemote
@@ -154,7 +144,6 @@ export class OrcaRuntimeWithGetAgentSessionExecutionNamespace extends OrcaRuntim
     if (!startup) {
       throw new Error('agent_session_identity_required')
     }
-    await this.markWorkspaceTrustedForAgent(request.agent, workspace.connectionId, workspace.path)
     if (_caller.signal?.aborted) {
       throw new Error('client_disconnected')
     }
@@ -164,16 +153,11 @@ export class OrcaRuntimeWithGetAgentSessionExecutionNamespace extends OrcaRuntim
       launchConfig: startup.launchConfig,
       startupCommandDelivery: startup.startupCommandDelivery,
       launchAgent: request.agent,
+      terminalKittyKeyboardProtocol: request.terminalKittyKeyboardProtocol,
       presentation: request.presentation ?? 'background',
       tabId: request.placement?.tabId,
       leafId: request.placement?.leafId,
       agentSessionClaim: claim,
-      ...(handoffAuthority
-        ? {
-            launchToken: handoffAuthority.spawnToken,
-            structuredAgentSessionId: handoffAuthority.sessionId
-          }
-        : {}),
       signal: _caller.signal
     })
     return {

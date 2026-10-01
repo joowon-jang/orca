@@ -1,78 +1,41 @@
-import type { StoreApi } from 'zustand'
-import type {
-  RemoteWorkspaceObservedPatchResult,
-  RemoteWorkspaceObservedSnapshot
-} from '../../../shared/remote-workspace-types'
-import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
+import type { RemoteWorkspaceObservedSnapshot } from '../../../shared/remote-workspace-types'
 import type { DirectSshAuthority } from '../../../shared/ssh-types'
 import { translate } from '@/i18n/i18n'
 import { buildWorkspaceSessionPayload } from '../lib/workspace-session'
-import type { AppState } from '../store/types'
 import type {
-  DirectSshPreparationInput,
-  DirectSshPreparationOutcome,
   DirectSshPreparationToken,
   DirectSshSnapshotApplyToken
 } from './direct-ssh-reconnect-coordinator'
 import { buildDirectSshSnapshotApplyToken } from './direct-ssh-reconnect-coordinator'
-import { resolveDirectSshTargetScope } from '../lib/direct-ssh-target-scope'
+import { resolveExactDirectSshTargetWorktreeIds } from './remote-workspace-snapshot-placement'
 import { applyDirectSshRemoteWorkspaceSnapshot } from './remote-workspace-snapshot-apply'
 import { createRemoteWorkspaceSnapshotArrivalCoordinator } from './remote-workspace-snapshot-arrival-coordinator'
+import { createDeferredSnapshotPlacementRetries } from './remote-workspace-deferred-placement-retry'
 import { applyRemoteWorkspacePushStatus } from './remote-workspace-push-status'
+import { terminalLayoutNodeEqual } from '../lib/terminal-layout-equality'
 import { waitForRemoteWorkspaceSessionReady } from './remote-workspace-session-readiness'
+import type {
+  RemoteWorkspaceTargetSync,
+  RemoteWorkspaceTargetSyncDeps
+} from './remote-workspace-target-sync-types'
+
+export type {
+  RemoteWorkspaceTargetSync,
+  RemoteWorkspaceTargetSyncDeps
+} from './remote-workspace-target-sync-types'
 
 const MAX_SNAPSHOT_APPLY_ATTEMPTS = 3
-
-type RemoteWorkspaceApi = {
-  get: (args: { targetId: string }) => Promise<RemoteWorkspaceObservedSnapshot | null>
-  setForConnectedTargets: (args: {
-    session?: WorkspaceSessionState
-    hydratedTargetIds?: string[]
-    expectedRevisionsByTargetId: Record<string, number>
-    expectedHostObservationTokensByTargetId: Record<string, string>
-  }) => Promise<{ targetId: string; result: RemoteWorkspaceObservedPatchResult }[]>
-}
-
-export type RemoteWorkspaceTargetSyncDeps = {
-  store: Pick<StoreApi<AppState>, 'getState'> & Partial<Pick<StoreApi<AppState>, 'subscribe'>>
-  remoteWorkspace: RemoteWorkspaceApi
-  getCurrentAuthority: (targetId: string) => DirectSshAuthority | null
-  isPreparationTokenCurrent: (token: DirectSshPreparationToken) => boolean
-  capturePreparationInput: (
-    authority: DirectSshAuthority,
-    reason: 'workspace-snapshot',
-    snapshotRevision: number
-  ) => Promise<DirectSshPreparationInput | null>
-  prepareOnly: (input: DirectSshPreparationInput) => Promise<DirectSshPreparationOutcome>
-  finalizeHydratedTerminals: (authority: DirectSshAuthority) => number
-}
-
-export type RemoteWorkspaceTargetSync = {
-  syncAfterConnect: (token: DirectSshPreparationToken) => Promise<void>
-  applyUnsolicitedSnapshot: (
-    targetId: string,
-    snapshot: RemoteWorkspaceObservedSnapshot
-  ) => Promise<void>
-  stop: () => void
-}
-
-function exactTargetWorktreeIds(state: AppState, authority: DirectSshAuthority): Set<string> {
-  return resolveDirectSshTargetScope({
-    targetId: authority.targetId,
-    catalogRevision: 0,
-    repos: state.repos,
-    worktreesByRepo: state.worktreesByRepo,
-    detectedWorktreesByRepo: state.detectedWorktreesByRepo,
-    folderWorkspaces: state.folderWorkspaces,
-    projectGroups: state.projectGroups,
-    restoredRuntimeHostIdByWorkspaceSessionKey: state.restoredRuntimeHostIdByWorkspaceSessionKey
-  }).gitWorktreeIds
-}
 
 export function createRemoteWorkspaceTargetSync(
   deps: RemoteWorkspaceTargetSyncDeps
 ): RemoteWorkspaceTargetSync {
   const arrivals = createRemoteWorkspaceSnapshotArrivalCoordinator()
+  const deferredPlacementRetries = createDeferredSnapshotPlacementRetries({
+    store: deps.store,
+    getCurrentAuthority: deps.getCurrentAuthority,
+    getSnapshot: (targetId) => deps.remoteWorkspace.get({ targetId }),
+    applySnapshot: (targetId, snapshot) => applyUnsolicitedSnapshot(targetId, snapshot)
+  })
 
   const isArrivalCurrent = arrivals.isCurrent
 
@@ -104,6 +67,7 @@ export function createRemoteWorkspaceTargetSync(
   ): Promise<void> => {
     let applyToken = initialToken
     for (let attempt = 0; attempt < MAX_SNAPSHOT_APPLY_ATTEMPTS; attempt += 1) {
+      let unplacedTabWorktreePaths: readonly string[] = []
       const result = await applyDirectSshRemoteWorkspaceSnapshot({
         store: deps.store,
         snapshot,
@@ -114,8 +78,14 @@ export function createRemoteWorkspaceTargetSync(
         isPreparationTokenCurrent: deps.isPreparationTokenCurrent,
         waitForWorkspaceSessionReady: (signal) =>
           waitForRemoteWorkspaceSessionReady(deps.store, signal),
-        finalizeHydratedTerminals: deps.finalizeHydratedTerminals
+        finalizeHydratedTerminals: deps.finalizeHydratedTerminals,
+        onUnplacedTabWorktreePaths: (worktreePaths) => {
+          unplacedTabWorktreePaths = worktreePaths
+        }
       })
+      if (result === 'applied') {
+        deferredPlacementRetries.watch(authority, unplacedTabWorktreePaths)
+      }
       if (result !== 'stale' || !isArrivalCurrent(authority.targetId, arrival)) {
         return
       }
@@ -172,7 +142,7 @@ export function createRemoteWorkspaceTargetSync(
       return
     }
     const stateBeforeGet = deps.store.getState()
-    const worktreeIds = exactTargetWorktreeIds(stateBeforeGet, authority)
+    const worktreeIds = resolveExactDirectSshTargetWorktreeIds(stateBeforeGet, authority)
     const hasLocalTabs = [...worktreeIds].some(
       (worktreeId) => (stateBeforeGet.tabsByWorktree[worktreeId] ?? []).length > 0
     )
@@ -222,6 +192,7 @@ export function createRemoteWorkspaceTargetSync(
     if (!isArrivalCurrent(authority.targetId, arrival) || !deps.isPreparationTokenCurrent(token)) {
       return
     }
+    const pendingLayoutEdits = deps.store.getState().pendingDirectSshLayoutEditsByTabId
     const results = await deps.remoteWorkspace.setForConnectedTargets({
       session: buildWorkspaceSessionPayload(deps.store.getState()),
       hydratedTargetIds: [authority.targetId],
@@ -234,6 +205,21 @@ export function createRemoteWorkspaceTargetSync(
       return
     }
     const result = results.find((entry) => entry.targetId === authority.targetId)?.result
+    if (result?.ok) {
+      const currentState = deps.store.getState()
+      currentState.acknowledgeDirectSshLayoutEdits(
+        Object.fromEntries(
+          Object.entries(pendingLayoutEdits ?? {}).flatMap(([tabId, entry]) => {
+            const uploaded = result.snapshot.session.terminalLayoutsByTabId[tabId]
+            return entry.targetId === authority.targetId &&
+              uploaded &&
+              terminalLayoutNodeEqual(entry.root, uploaded.root)
+              ? [[tabId, entry]]
+              : []
+          })
+        )
+      )
+    }
     applyRemoteWorkspacePushStatus(deps.store.getState(), authority.targetId, result, snapshot)
   }
 
@@ -307,6 +293,7 @@ export function createRemoteWorkspaceTargetSync(
     syncAfterConnect,
     applyUnsolicitedSnapshot,
     stop: () => {
+      deferredPlacementRetries.stop()
       arrivals.stop()
     }
   }

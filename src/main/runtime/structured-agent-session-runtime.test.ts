@@ -1,15 +1,29 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   AgentSessionClaimStatus,
+  AgentSessionExecutionLocation,
   AgentSessionProcessIdentity,
   AgentSessionRecord
 } from '../../shared/agent-session-record'
+import { __setWindowsProcessTreeLoaderForTests } from '../windows/windows-process-table'
+import { agentModelCatalogStore } from '../native-chat/agent-model-catalog/agent-model-catalog-store'
+import {
+  NO_LEGACY_JOURNAL_RECORDS,
+  type JournalLegacyRecordImport
+} from '../native-chat/agent-session-journal/journal-database'
+import {
+  JournalHostDatabase,
+  journalDatabasePath
+} from '../native-chat/agent-session-journal/journal-host-database'
+import { legacyAgentSessionStorePath } from './agent-session-record-store-file'
 import {
   createStructuredAgentSessionOwnerProbe,
-  createStructuredAgentSessionOwnerProbes,
+  createStructuredAgentSessionOwnerProbes
+} from './structured-agent-session-owner-probe'
+import {
   ensureStructuredAgentSessionHost,
   hasPersistedStructuredAgentSessionStore,
   stopStructuredAgentSessionRuntime
@@ -49,35 +63,79 @@ const OWNER: AgentSessionProcessIdentity = {
 const deadProbe = () => vi.fn(async () => ({ outcome: 'pid-absent' }) as const)
 
 describe('structured agent-session store presence', () => {
-  it('stops after finding the durable primary store', () => {
-    const fileExists = vi.fn(() => true)
-
-    expect(hasPersistedStructuredAgentSessionStore('/profile', fileExists)).toBe(true)
-    expect(fileExists).toHaveBeenCalledOnce()
-    expect(fileExists).toHaveBeenCalledWith(
-      join('/profile', 'agent-sessions', 'agent-sessions.json')
-    )
+  let profile: string
+  afterEach(async () => {
+    if (profile) {
+      await rm(profile, { recursive: true, force: true })
+      profile = ''
+    }
   })
 
-  it('checks the durable backup when the primary store is absent', () => {
+  async function openProfileDatabase(
+    legacyRecords: JournalLegacyRecordImport = NO_LEGACY_JOURNAL_RECORDS
+  ): Promise<JournalHostDatabase> {
+    profile = await mkdtemp(join(tmpdir(), 'orca-session-presence-'))
+    return JournalHostDatabase.openWith(profile, legacyRecords)
+  }
+
+  async function writeRecordsFile(): Promise<void> {
+    const filePath = legacyAgentSessionStorePath(profile)
+    await mkdir(dirname(filePath), { recursive: true })
+    await writeFile(filePath, '{}')
+  }
+
+  // Every host install creates the database, chats or not; startup restore must not wait on one.
+  it('reports a profile whose database holds no chat absent', async () => {
+    ;(await openProfileDatabase()).close()
+
+    expect(hasPersistedStructuredAgentSessionStore(profile)).toBe(false)
+  })
+
+  it('reports a chat record in the database', async () => {
+    const database = await openProfileDatabase()
+    database.db
+      .prepare('INSERT INTO agent_session_records (session_id, record_json) VALUES (?, ?)')
+      .run('session-1', '{}')
+    database.close()
+
+    expect(hasPersistedStructuredAgentSessionStore(profile)).toBe(true)
+  })
+
+  it('lets the records file answer while the database still owes its copy', async () => {
+    ;(await openProfileDatabase({ owed: true })).close()
+    expect(hasPersistedStructuredAgentSessionStore(profile)).toBe(false)
+
+    await writeRecordsFile()
+    expect(hasPersistedStructuredAgentSessionStore(profile)).toBe(true)
+  })
+
+  it('reports a database it cannot read present', async () => {
+    profile = await mkdtemp(join(tmpdir(), 'orca-session-presence-'))
+    await writeFile(journalDatabasePath(profile), 'not a database')
+
+    expect(hasPersistedStructuredAgentSessionStore(profile)).toBe(true)
+  })
+
+  // A profile from before the records moved into the database still holds a chat to import.
+  it('checks the records file and its backup when the database is absent', () => {
     const fileExists = vi.fn((path: string) => path.endsWith('.bak'))
 
     expect(hasPersistedStructuredAgentSessionStore('/profile', fileExists)).toBe(true)
     expect(fileExists).toHaveBeenNthCalledWith(
-      1,
+      2,
       join('/profile', 'agent-sessions', 'agent-sessions.json')
     )
     expect(fileExists).toHaveBeenNthCalledWith(
-      2,
+      3,
       join('/profile', 'agent-sessions', 'agent-sessions.json.bak')
     )
   })
 
-  it('reports a fresh profile absent after two bounded presence checks', () => {
+  it('reports a fresh profile absent after three bounded presence checks', () => {
     const fileExists = vi.fn(() => false)
 
     expect(hasPersistedStructuredAgentSessionStore('/profile', fileExists)).toBe(false)
-    expect(fileExists).toHaveBeenCalledTimes(2)
+    expect(fileExists).toHaveBeenCalledTimes(3)
   })
 })
 
@@ -183,17 +241,6 @@ describe('structured agent-session owner probe', () => {
 
     expect(result.outcome).toBe('indeterminate')
   })
-
-  it('releases only a reservation carrying durable pre-spawn proof', async () => {
-    const probe = deadProbe()
-    const result = await createStructuredAgentSessionOwnerProbe(
-      HOST_ID,
-      probe
-    )(record(null, { processlessAt: 1_800_000_000_000, claimStatus: 'reserved' }))
-
-    expect(probe).not.toHaveBeenCalled()
-    expect(result).toEqual({ outcome: 'reservation-unused' })
-  })
 })
 
 describe('structured agent-session runtime install', () => {
@@ -208,58 +255,61 @@ describe('structured agent-session runtime install', () => {
     vi.restoreAllMocks()
   })
 
-  it('starts orphan reaping and reports failures without failing installation', async () => {
+  it('holds stop until the model catalog has written its coalesced save', async () => {
     stateDirectory = await mkdtemp(join(tmpdir(), 'orca-structured-runtime-'))
-    const failure = new Error('scan failed')
-    const reapOrphanChildren = vi.fn(async () => {
-      throw failure
+    await ensureStructuredAgentSessionHost({
+      stateDirectory,
+      hostId: HOST_ID,
+      claimKeyId: 'key-1',
+      resolveWorkspacePath: async () => stateDirectory!,
+      resolveClaudeAuthPolicy: () => ({ stripAuthEnv: true }),
+      resolveEnvironment: async () => ({})
     })
-    const onError = vi.fn()
-
-    await expect(
-      ensureStructuredAgentSessionHost({
-        stateDirectory,
-        hostId: HOST_ID,
-        claimKeyId: 'key-1',
-        resolveWorkspacePath: async () => stateDirectory!,
-        resolveEnvironment: async () => ({}),
-        reapOrphanChildren,
-        onError
-      })
-    ).resolves.toBeDefined()
-
-    await vi.waitFor(() =>
-      expect(onError).toHaveBeenCalledWith({
-        scope: 'agent-session-orphan-child-reaper',
-        error: failure
+    let finishWrite = (): void => {}
+    vi.spyOn(agentModelCatalogStore, 'flushPersistence').mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishWrite = resolve
       })
     )
-    expect(reapOrphanChildren).toHaveBeenCalledWith({ store: expect.anything() })
+
+    // Quit joins this stop to its teardown barrier; the unref'd coalesce timer never fires after it.
+    let stopped = false
+    const stop = stopStructuredAgentSessionRuntime().then(() => {
+      stopped = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(stopped).toBe(false)
+    finishWrite()
+    await stop
+    expect(stopped).toBe(true)
   })
 
-  it('logs an orphan-reaper failure when no reporter is configured', async () => {
+  it('does not infer Windows process identity support from an injected reader', async () => {
     stateDirectory = await mkdtemp(join(tmpdir(), 'orca-structured-runtime-'))
-    const failure = new Error('scan failed')
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-
-    await expect(
-      ensureStructuredAgentSessionHost({
+    const originalPlatform = process.platform
+    const location: AgentSessionExecutionLocation = {
+      executionHostId: 'local',
+      wslDistro: null,
+      workspaceId: 'workspace-1',
+      workspaceKind: 'folder'
+    }
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    __setWindowsProcessTreeLoaderForTests(() => null)
+    try {
+      const host = await ensureStructuredAgentSessionHost({
         stateDirectory,
         hostId: HOST_ID,
         claimKeyId: 'key-1',
         resolveWorkspacePath: async () => stateDirectory!,
         resolveEnvironment: async () => ({}),
-        reapOrphanChildren: async () => {
-          throw failure
-        }
+        resolveClaudeAuthPolicy: () => ({ stripAuthEnv: true }),
+        readProcessStartTime: async () => 1_700_000_000_000
       })
-    ).resolves.toBeDefined()
 
-    await vi.waitFor(() =>
-      expect(consoleError).toHaveBeenCalledWith(
-        '[structured-agent-session] orphan reaper failed',
-        failure
-      )
-    )
+      expect(host.supportsCreate(location, 'codex')).toBe(false)
+    } finally {
+      __setWindowsProcessTreeLoaderForTests()
+      Object.defineProperty(process, 'platform', { configurable: true, value: originalPlatform })
+    }
   })
 })

@@ -1,7 +1,6 @@
 import type {
   AgentLaunchConfigRegistryEntry,
   AgentLaunchConfigRegistrationMetadata,
-  AgentLaunchConfigStatusMetadata,
   AgentProviderSessionRecordMetadata,
   AgentProviderSessionRouting,
   AgentProviderSessionTiming,
@@ -14,6 +13,7 @@ import type {
   AgentProviderSessionMetadata,
   DropAgentStatusByTabPrefixOptions,
   DropAgentStatusByWorktreeOptions,
+  DropAgentStatusOptions,
   DropHibernatedAgentPaneOptions,
   RetainedAgentEntry,
   AllAgentSessionCaptureMode
@@ -60,7 +60,7 @@ export type AgentStatusSlice = {
   recentlyClosedAgentStatusTabIds: Record<string, true>
 
   /** Exact pane authorities retired while sibling panes in the tab stay live. */
-  recentlyRetiredAgentStatusPaneKeys: Record<string, true>
+  recentlyRetiredAgentStatusPaneKeys: Record<string, true | string>
 
   retireAgentPaneAuthority: (
     paneKey: string,
@@ -111,9 +111,6 @@ export type AgentStatusSlice = {
   getAgentLaunchConfigForStatusEntry: (
     entry: AgentStatusEntry
   ) => SleepingAgentLaunchConfig | undefined
-  getAgentLaunchConfigForStatusMetadata: (
-    metadata: AgentLaunchConfigStatusMetadata
-  ) => SleepingAgentLaunchConfig | undefined
   clearAgentLaunchConfig: (paneKey: string) => void
 
   setRuntimeAgentOrchestrationByPaneKey: (
@@ -133,7 +130,7 @@ export type AgentStatusSlice = {
   clearTransientAgentStatuses: (connectionId: string, clearedAt: number) => void
 
   /** Remove a single entry AND suppress re-retention on its next disappearance (user-initiated teardown: X button, pane close). */
-  dropAgentStatus: (paneKey: string) => void
+  dropAgentStatus: (paneKey: string, opts?: DropAgentStatusOptions) => void
 
   /** Remove all entries under a tab AND suppress re-retention for each (tab close — no rows may reappear). */
   dropAgentStatusByTabPrefix: (
@@ -157,7 +154,6 @@ export type AgentStatusSlice = {
   captureAllSleepingAgentSessions: (mode: AllAgentSessionCaptureMode) => void
   clearSleepingAgentSession: (paneKey: string) => void
   clearSleepingAgentSessionsByPaneKey: (paneKeys: readonly string[]) => void
-  setSleepingAgentAutomaticResumeBlocked: (paneKey: string, blocked: boolean) => void
   clearSleepingAgentSessionsByWorktree: (worktreeId: string) => void
   pruneSleepingAgentSessions: (validWorktreeIds: Set<string>) => void
 
@@ -166,6 +162,9 @@ export type AgentStatusSlice = {
 
   /** Dismiss a retained entry by its paneKey. */
   dismissRetainedAgent: (paneKey: string) => void
+
+  /** Dismiss several retained entries in one set (Activity "Clear completed"). */
+  dismissRetainedAgents: (paneKeys: readonly string[]) => void
 
   /** Dismiss all retained entries belonging to a worktree. */
   dismissRetainedAgentsByWorktree: (worktreeId: string) => void

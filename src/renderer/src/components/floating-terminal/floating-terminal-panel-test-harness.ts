@@ -31,6 +31,7 @@ export type FloatingTerminalPanelMocks = {
   >
   closeBrowserTab: Mock<FloatingPanelStoreState['closeBrowserTab']>
   closeWebRuntimeSessionTab: Mock<(args: { worktreeId: string; tabId: string }) => Promise<boolean>>
+  clearEditorDraft: Mock<FloatingPanelStoreState['clearEditorDraft']>
   closeFile: Mock<FloatingPanelStoreState['closeFile']>
   closeTab: Mock<(tabId: string, options?: { reason?: string }) => void>
   closeTerminalTab: Mock<(tabId: string, options?: { onClosed?: () => void }) => void>
@@ -59,7 +60,6 @@ export type FloatingTerminalPanelMocks = {
   pinFile: Mock<FloatingPanelStoreState['pinFile']>
   setFloatingFocus: Mock<(state: { panelFocused: boolean; terminalFocused: boolean }) => void>
   setActiveTab: Mock<FloatingPanelStoreState['setActiveTab']>
-  setRenamingTabId: Mock<FloatingPanelStoreState['setRenamingTabId']>
   setTabColor: Mock<FloatingPanelStoreState['setTabColor']>
   setTabCustomTitle: Mock<FloatingPanelStoreState['setTabCustomTitle']>
   setTabPaneExpanded: Mock<FloatingPanelStoreState['setTabPaneExpanded']>
@@ -72,6 +72,7 @@ export const mocks: FloatingTerminalPanelMocks = {
   activateWebRuntimeSessionTab: vi.fn(),
   closeBrowserTab: vi.fn(),
   closeWebRuntimeSessionTab: vi.fn(),
+  clearEditorDraft: vi.fn(),
   closeFile: vi.fn(),
   closeTab: vi.fn(),
   // Models terminal-tab-actions.closeTerminalTab: a real close removes the tab from the store, then
@@ -106,7 +107,6 @@ export const mocks: FloatingTerminalPanelMocks = {
   pinFile: vi.fn(),
   setFloatingFocus: vi.fn(),
   setActiveTab: vi.fn(),
-  setRenamingTabId: vi.fn(),
   setTabColor: vi.fn(),
   setTabCustomTitle: vi.fn(),
   setTabPaneExpanded: vi.fn(),
@@ -133,9 +133,9 @@ function resetStore(tabs: TerminalTab[] = []): void {
     activeGroupIdByWorktree: {},
     activeTabIdByWorktree: { [FLOATING_TERMINAL_WORKTREE_ID]: tabs[0]?.id ?? null },
     expandedPaneByTabId: {},
-    renamingTabId: null,
     activateTab: mocks.activateTab,
     closeBrowserTab: mocks.closeBrowserTab,
+    clearEditorDraft: mocks.clearEditorDraft,
     closeFile: mocks.closeFile,
     closeUnifiedTab: mocks.closeUnifiedTab,
     createTab: mocks.createTab,
@@ -147,7 +147,6 @@ function resetStore(tabs: TerminalTab[] = []): void {
     pinFile: mocks.pinFile,
     setActiveTab: mocks.setActiveTab,
     setTabCustomTitle: mocks.setTabCustomTitle,
-    setRenamingTabId: mocks.setRenamingTabId,
     setTabColor: mocks.setTabColor,
     setTabPaneExpanded: mocks.setTabPaneExpanded,
     browserDefaultUrl: 'about:blank',
@@ -196,6 +195,7 @@ export async function setupFloatingTerminalPanelTest(): Promise<void> {
   }
   vi.stubGlobal('window', {
     addEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
     api: {
       app: {
         getFloatingMarkdownDirectory: mocks.getFloatingMarkdownDirectory,

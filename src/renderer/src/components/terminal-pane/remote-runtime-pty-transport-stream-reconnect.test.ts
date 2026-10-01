@@ -9,6 +9,7 @@ import {
   createRemoteRuntimeTransportMocks,
   type MultiplexSubscriptionCallbacks
 } from './remote-runtime-pty-transport-test-harness'
+import { REMOTE_RUNTIME_AUTO_RECOVERY_TIMEOUT_MS } from './remote-runtime-pty-recovery-state'
 
 let subscriptionCallbacks: MultiplexSubscriptionCallbacks = null
 let resolvedPaneHandle = 'terminal-1'
@@ -465,7 +466,7 @@ describe('createRemoteRuntimePtyTransport', () => {
       })
 
       expect(transport.isConnected()).toBe(false)
-      expect(transport.sendInput(`detached-${cycle}`)).toBe(false)
+      expect(transport.sendInput(`detached-${cycle}`, 'driving')).toBe(false)
       expect(unsubscribeByEpoch[cycle]).toHaveBeenCalledTimes(1)
       await vi.waitFor(() => expect(runtimeSubscribe).toHaveBeenCalledTimes(cycle + 2))
       await vi.waitFor(() => expect(latestSubscribePayload().terminal).toBe('terminal-1'))
@@ -534,14 +535,14 @@ describe('createRemoteRuntimePtyTransport', () => {
 
       partitioned = true
       callbacksByConnection[0].onClose?.()
-      await vi.advanceTimersByTimeAsync(60_000)
+      await vi.advanceTimersByTimeAsync(REMOTE_RUNTIME_AUTO_RECOVERY_TIMEOUT_MS)
 
       const disconnectedState = transport.getRecoveryState?.()
       const callsAtCutoff = runtimeSubscribe.mock.calls.length
       expect(disconnectedState?.phase).toBe('disconnected')
       expect(transport.getPtyId()).toBe('remote:env-1@@terminal-1')
       expect(transport.isConnected()).toBe(false)
-      expect(transport.sendInput('must not reach a stale socket')).toBe(false)
+      expect(transport.sendInput('must not reach a stale socket', 'driving')).toBe(false)
       expect(onError).not.toHaveBeenCalled()
       await vi.advanceTimersByTimeAsync(5 * 60_000)
       expect(runtimeSubscribe).toHaveBeenCalledTimes(callsAtCutoff)
@@ -590,7 +591,7 @@ describe('createRemoteRuntimePtyTransport', () => {
     subscriptionCallbacks?.onClose?.()
     await vi.waitFor(() => expect(runtimeSubscribe).toHaveBeenCalledTimes(2))
     expect(transport.claimViewport?.(101, 33)).toBe(true)
-    const accepted = transport.sendInputAccepted?.('\x03')
+    const accepted = transport.sendInputAccepted?.('\x03', 'driving')
     await Promise.resolve()
     rejectReconnect(new Error('reconnect failed'))
 
@@ -609,7 +610,7 @@ describe('createRemoteRuntimePtyTransport', () => {
     const { streamId } = latestSubscribePayload()
 
     expect(transport.claimViewport?.(101, 33)).toBe(true)
-    const accepted = transport.sendInputAccepted?.('x')
+    const accepted = transport.sendInputAccepted?.('x', 'driving')
     subscriptionCallbacks?.onResponse({
       ok: true,
       result: { type: 'end', streamId }

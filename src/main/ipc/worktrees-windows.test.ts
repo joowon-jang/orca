@@ -74,6 +74,7 @@ vi.mock('../git/worktree', () => ({
   listWorktrees: listWorktreesMock,
   listWorktreesStrict: listWorktreesMock,
   listWorktreesSharedStrict: listWorktreesMock,
+  listWorktreesSharedStrictAllowingTrueEmpty: listWorktreesMock,
   describeCreatedWorktree: vi.fn().mockResolvedValue(undefined),
   assertWorktreeCleanForRemoval: assertWorktreeCleanForRemovalMock,
   addWorktree: addWorktreeMock,
@@ -310,7 +311,10 @@ describe('registerWorktreeHandlers – Windows path handling', () => {
       closeFileWatchersForRemoval: vi.fn().mockResolvedValue(undefined),
       acquireFileWatcherRemoval: vi.fn().mockResolvedValue({
         finish: vi.fn().mockResolvedValue(undefined)
-      })
+      }),
+      publishWorktreeRemovalChange: vi.fn((repoId: string) =>
+        mainWindow.webContents.send('worktrees:changed', { repoId })
+      )
     }
     registerWorktreeHandlers(mainWindow as never, store as never, runtimeStub as never)
   })
@@ -336,7 +340,9 @@ describe('registerWorktreeHandlers – Windows path handling', () => {
       'C:\\workspaces\\improve-dashboard',
       'improve-dashboard',
       'origin/main',
-      false
+      false,
+      false,
+      {}
     )
     expect(resolveLocalGitUsernameMock).not.toHaveBeenCalled()
     // A name the user typed is never retired — the pool holds ordinary words people choose.
@@ -402,7 +408,9 @@ describe('registerWorktreeHandlers – Windows path handling', () => {
       'C:\\workspaces\\nautilus',
       'nautilus',
       'origin/main',
-      false
+      false,
+      false,
+      {}
     )
     expect(store.addRetiredWorktreeName).not.toHaveBeenCalled()
   })
@@ -436,7 +444,9 @@ describe('registerWorktreeHandlers – Windows path handling', () => {
       'C:\\workspaces\\improve-dashboard',
       'octocat/improve-dashboard',
       'origin/main',
-      false
+      false,
+      false,
+      {}
     )
   })
 

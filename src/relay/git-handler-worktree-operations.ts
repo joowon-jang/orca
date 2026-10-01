@@ -2,7 +2,9 @@ import * as path from 'node:path'
 import type { RequestContext } from './dispatcher'
 import { expandTilde } from './context'
 import { GitHandlerOperationContext } from './git-handler-operation-context'
-import { isUnsupportedWorktreeListZError, parseWorktreeList } from './git-handler-utils'
+import { isUnsupportedWorktreeListZError } from './git-handler-utils'
+import { parseWorktreeList } from '../shared/git-worktree-porcelain-parser'
+import type { GitWorktreeInfo } from '../shared/worktree/types'
 import {
   addWorktreeOp,
   areRelayWorktreePathsEqual,
@@ -10,7 +12,10 @@ import {
   worktreeIsCleanOp
 } from './git-handler-worktree-ops'
 import { annotatePrunableWorktreesByExistence } from './git-handler-worktree-list'
-import { refreshLocalBaseRefForWorktreeCreateOp } from './git-handler-local-base-ref-refresh'
+import {
+  inspectLocalBaseRefForWorktreeCreateOp,
+  refreshLocalBaseRefForWorktreeCreateOp
+} from './git-handler-local-base-ref-refresh'
 import {
   hasUnsupportedRevParsePathFormatEcho,
   isUnsupportedRevParsePathFormatError
@@ -91,11 +96,11 @@ export class GitHandlerWorktreeOperations extends GitHandlerOperationContext {
 
   private async normalizeMainWorktreePath(
     repoPath: string,
-    worktrees: Record<string, unknown>[]
-  ): Promise<Record<string, unknown>[]> {
+    worktrees: GitWorktreeInfo[]
+  ): Promise<GitWorktreeInfo[]> {
     const mainIndex = worktrees.findIndex((worktree) => worktree.isMainWorktree === true)
     const mainWorktree = worktrees[mainIndex]
-    const mainPath = typeof mainWorktree?.path === 'string' ? mainWorktree.path : ''
+    const mainPath = mainWorktree?.path ?? ''
     // Expand `~` so legacy tilde SSH repo paths match git's absolute path, sparing a rev-parse per poll.
     const resolvedRepoPath = expandTilde(repoPath)
     if (!mainPath || areRelayWorktreePathsEqual(mainPath, resolvedRepoPath)) {
@@ -168,5 +173,9 @@ export class GitHandlerWorktreeOperations extends GitHandlerOperationContext {
     return this.runWithGitReadCacheClear(() =>
       refreshLocalBaseRefForWorktreeCreateOp(this.git.bind(this), params, this.gitCapabilities)
     )
+  }
+
+  async inspectLocalBaseRefForWorktreeCreate(params: Record<string, unknown>) {
+    return inspectLocalBaseRefForWorktreeCreateOp(this.git.bind(this), params, this.gitCapabilities)
   }
 }

@@ -3,7 +3,10 @@ import type { DropAgentStatusByTabPrefixOptions } from './agent-status-contract'
 import { pruneMigrationUnsupportedEntries } from './agent-status-migration-unsupported-entries'
 import {
   boundRecentlyClosedAgentStatusTabIds,
-  boundRecentlyRetiredAgentStatusPaneKeys
+  boundRecentlyRetiredAgentStatusPaneKeys,
+  removePaneKeys,
+  closedAgentStatusRetirementKeys,
+  removePaneKeysByTabPrefix
 } from './agent-status-pane-keyed-records'
 import { findCompletedOrphanPaneKeysForTabClose } from './agent-status-pane-key-tab-binding'
 
@@ -26,10 +29,12 @@ export function buildAgentStatusBatchPatch(
 export type AgentStatusTabPrefixDropState = Pick<
   AppState,
   | 'acknowledgedAgentsByPaneKey'
+  | 'activityClearedAtByPaneKey'
   | 'agentLaunchConfigByPaneKey'
   | 'agentStatusByPaneKey'
   | 'agentStatusEpoch'
   | 'migrationUnsupportedByPtyId'
+  | 'manuallyUnreadTurnsByPaneKey'
   | 'recentlyClosedAgentStatusTabIds'
   | 'recentlyRetiredAgentStatusPaneKeys'
   | 'retainedAgentsByPaneKey'
@@ -46,31 +51,35 @@ export function buildAgentStatusTabPrefixDropPatch(
   s: AgentStatusTabPrefixDropState,
   tabIdPrefix: string,
   retiredAliasPaneKeys: readonly string[],
-  opts?: DropAgentStatusByTabPrefixOptions
+  opts?: DropAgentStatusByTabPrefixOptions & { paneKeys?: ReadonlySet<string> }
 ): { patch: Partial<AgentStatusTabPrefixDropState>; hadLive: boolean } {
   const prefix = `${tabIdPrefix}:`
+  const matchesPane = (key: string): boolean =>
+    key.startsWith(prefix) && (!opts?.paneKeys || opts.paneKeys.has(key))
   let hadLive = false
   const buildPatch = (): Partial<AgentStatusTabPrefixDropState> => {
-    const completedOrphanKeys = findCompletedOrphanPaneKeysForTabClose(s, opts?.worktreeId, prefix)
+    const completedOrphanKeys = opts?.paneKeys
+      ? []
+      : findCompletedOrphanPaneKeysForTabClose(s, opts?.worktreeId, prefix)
     const completedOrphanKeySet = new Set(completedOrphanKeys)
     const liveKeys = [
-      ...Object.keys(s.agentStatusByPaneKey).filter((k) => k.startsWith(prefix)),
+      ...Object.keys(s.agentStatusByPaneKey).filter((k) => matchesPane(k)),
       ...completedOrphanKeys
     ]
     const launchConfigKeys = Object.keys(s.agentLaunchConfigByPaneKey).filter(
-      (k) => k.startsWith(prefix) || completedOrphanKeySet.has(k)
+      (k) => matchesPane(k) || completedOrphanKeySet.has(k)
     )
     const retainedKeys = Object.keys(s.retainedAgentsByPaneKey).filter(
-      (k) => k.startsWith(prefix) || completedOrphanKeySet.has(k)
+      (k) => matchesPane(k) || completedOrphanKeySet.has(k)
     )
     const migrationUnsupported = pruneMigrationUnsupportedEntries(
       s.migrationUnsupportedByPtyId,
-      (entry) => entry.paneKey?.startsWith(prefix) ?? false
+      (entry) => (entry.paneKey ? matchesPane(entry.paneKey) : false)
     )
     // See removeAgentStatus for ack-cleanup rationale; ack entries are owned by the pane lifecycle regardless of live/retained state.
     let nextAck = s.acknowledgedAgentsByPaneKey
     const ackKeys = Object.keys(nextAck).filter(
-      (k) => k.startsWith(prefix) || completedOrphanKeySet.has(k)
+      (k) => matchesPane(k) || completedOrphanKeySet.has(k)
     )
     if (ackKeys.length > 0) {
       nextAck = { ...nextAck }
@@ -78,14 +87,35 @@ export function buildAgentStatusTabPrefixDropPatch(
         delete nextAck[k]
       }
     }
-    const nextClosedTabs = boundRecentlyClosedAgentStatusTabIds(
-      s.recentlyClosedAgentStatusTabIds,
-      tabIdPrefix
-    )
+    const nextClosedTabs = opts?.paneKeys
+      ? s.recentlyClosedAgentStatusTabIds
+      : boundRecentlyClosedAgentStatusTabIds(s.recentlyClosedAgentStatusTabIds, tabIdPrefix)
     const nextRetiredPaneKeys = boundRecentlyRetiredAgentStatusPaneKeys(
       s.recentlyRetiredAgentStatusPaneKeys,
-      retiredAliasPaneKeys
+      closedAgentStatusRetirementKeys(
+        s.recentlyRetiredAgentStatusPaneKeys,
+        prefix,
+        retiredAliasPaneKeys
+      )
     )
+    const nextClearedAt = opts?.preserveActivityClearedState
+      ? s.activityClearedAtByPaneKey
+      : opts?.paneKeys
+        ? removePaneKeys(s.activityClearedAtByPaneKey, opts.paneKeys)
+        : removePaneKeysByTabPrefix(
+            s.activityClearedAtByPaneKey,
+            tabIdPrefix,
+            completedOrphanKeySet
+          )
+    const nextManualUnread = opts?.preserveActivityClearedState
+      ? s.manuallyUnreadTurnsByPaneKey
+      : opts?.paneKeys
+        ? removePaneKeys(s.manuallyUnreadTurnsByPaneKey, opts.paneKeys)
+        : removePaneKeysByTabPrefix(
+            s.manuallyUnreadTurnsByPaneKey,
+            tabIdPrefix,
+            completedOrphanKeySet
+          )
 
     if (
       liveKeys.length === 0 &&
@@ -96,13 +126,25 @@ export function buildAgentStatusTabPrefixDropPatch(
       if (nextAck !== s.acknowledgedAgentsByPaneKey) {
         return {
           acknowledgedAgentsByPaneKey: nextAck,
+          ...(nextClearedAt !== s.activityClearedAtByPaneKey
+            ? { activityClearedAtByPaneKey: nextClearedAt }
+            : {}),
+          ...(nextManualUnread !== s.manuallyUnreadTurnsByPaneKey
+            ? { manuallyUnreadTurnsByPaneKey: nextManualUnread }
+            : {}),
           recentlyClosedAgentStatusTabIds: nextClosedTabs,
           recentlyRetiredAgentStatusPaneKeys: nextRetiredPaneKeys
         }
       }
       return {
         recentlyClosedAgentStatusTabIds: nextClosedTabs,
-        recentlyRetiredAgentStatusPaneKeys: nextRetiredPaneKeys
+        recentlyRetiredAgentStatusPaneKeys: nextRetiredPaneKeys,
+        ...(nextClearedAt !== s.activityClearedAtByPaneKey
+          ? { activityClearedAtByPaneKey: nextClearedAt }
+          : {}),
+        ...(nextManualUnread !== s.manuallyUnreadTurnsByPaneKey
+          ? { manuallyUnreadTurnsByPaneKey: nextManualUnread }
+          : {})
       }
     }
     hadLive = liveKeys.length > 0
@@ -147,6 +189,12 @@ export function buildAgentStatusTabPrefixDropPatch(
       recentlyRetiredAgentStatusPaneKeys: nextRetiredPaneKeys,
       ...(nextAck !== s.acknowledgedAgentsByPaneKey
         ? { acknowledgedAgentsByPaneKey: nextAck }
+        : {}),
+      ...(nextClearedAt !== s.activityClearedAtByPaneKey
+        ? { activityClearedAtByPaneKey: nextClearedAt }
+        : {}),
+      ...(nextManualUnread !== s.manuallyUnreadTurnsByPaneKey
+        ? { manuallyUnreadTurnsByPaneKey: nextManualUnread }
         : {}),
       // Why: mirrors removeAgentStatusByTabPrefix — only bump epochs when the live map changed; retained-only sweeps don't affect sort/freshness.
       agentStatusEpoch:

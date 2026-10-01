@@ -1,6 +1,7 @@
 import type * as pty from 'node-pty'
 import { PhysicalExitTracker } from '../../shared/physical-exit-tracker'
 import { killWithDescendantSweep } from '../pty-descendant-termination'
+import { terminateShutdownDescendants } from '../daemon/terminal-descendant-shutdown'
 import { forceKillPosixPtyProcessGroups } from '../pty/posix-pty-process-groups'
 import { terminatePtyJob } from '../windows/windows-pty-job'
 import {
@@ -188,19 +189,8 @@ async function shutdownTrackedPty(
     operation.rootSignalled = true
     requestTrackedPtyShutdown(id, proc, operation.immediate)
   }
-  if (ptyAgentSessionIds.has(id)) {
-    // Why: POSIX needs a pre-kill descendant snapshot; Windows tree-kills only when the
-    // identity probe returns `own` so agent/MCP orphans cannot hold the worktree cwd
-    // (#10004). `unknown`/`foreign`/`absent` skip taskkill and rely on root close alone.
-    await killWithDescendantSweep(proc.pid, signalRoot, {
-      ownsRoot: () => ptyProcesses.get(id) === proc,
-      terminateOwnedTree: () => terminatePtyJob(proc)
-    })
-  } else if (process.platform === 'win32' && operation.immediate) {
-    // Why: a plain shell's ConPTY teardown doesn't reap orphaned children (useConptyDll
-    // skips the console reap), so a live `pnpm i`/`node` keeps the ConPTY console alive and
-    // holds the worktree cwd. Tree kill runs only when the OS identity probe returns `own`;
-    // otherwise root close alone, and detached children may block physical stop (#10004).
+  if (ptyAgentSessionIds.has(id) || operation.immediate) {
+    // Typed agents also detach tool process groups; immediate close must snapshot before root exit.
     await killWithDescendantSweep(proc.pid, signalRoot, {
       ownsRoot: () => ptyProcesses.get(id) === proc,
       terminateOwnedTree: () => terminatePtyJob(proc)
@@ -267,13 +257,27 @@ async function shutdownPtyForAppQuit(id: string, proc: pty.IPty): Promise<void> 
     // A natural exit can win while the descendant snapshot is in flight.
     if (ptyProcesses.get(id) === proc) {
       requestPtyTermination(id, proc)
+      if (ptyProcesses.get(id) === proc && ptyTerminationMode.get(id) !== 'force') {
+        // App exit is the final native-handle boundary even when signalling fails.
+        destroyPtyProcess(proc, { alreadyKilled: true })
+      }
     }
   }
   try {
+    // Stop delayed startup commands before the asynchronous descendant snapshot.
+    runPtyCleanup(id)
+    disposePtyListeners(id)
     if (ptyAgentSessionIds.has(id) || process.platform === 'win32') {
       await killWithDescendantSweep(proc.pid, killRoot, {
         ownsRoot: () => ptyProcesses.get(id) === proc,
-        terminateOwnedTree: () => terminatePtyJob(proc)
+        terminateOwnedTree: () => terminatePtyJob(proc),
+        terminateDescendants: async (snapshot) => {
+          const verdict = await terminateShutdownDescendants(snapshot)
+          if (verdict !== 'exited') {
+            console.warn('[pty] app-quit descendant cleanup incomplete', { id, verdict })
+          }
+        },
+        awaitEscalation: true
       })
     } else {
       requestPlainPosixAppQuitTermination(id, proc)
@@ -287,7 +291,17 @@ async function shutdownPtyForAppQuit(id: string, proc: pty.IPty): Promise<void> 
   }
 }
 
-export async function killAllLocalPtys(): Promise<void> {
+let appQuitShutdown: Promise<void> | undefined
+
+export function killAllLocalPtys(): Promise<void> {
+  // Update prep can start the sweep before will-quit joins it, after the root has exited.
+  appQuitShutdown ??= killAllLocalPtysInternal().finally(() => {
+    appQuitShutdown = undefined
+  })
+  return appQuitShutdown
+}
+
+async function killAllLocalPtysInternal(): Promise<void> {
   cancelAllPendingLocalPtySpawns()
   const entries = [...ptyProcesses.entries()]
   for (const [id] of entries) {

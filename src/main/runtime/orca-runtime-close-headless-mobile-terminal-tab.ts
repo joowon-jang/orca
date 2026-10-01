@@ -11,9 +11,10 @@ import { buildHeadlessMobileSessionTabGroups } from './mobile-session-layout-pro
 import { appendRetiredTerminalSurfaceProofs } from './mobile-session-terminal-retirement-proof'
 import type { RuntimePtyWorktreeRecord } from './runtime-terminal-state-records'
 import type { TerminalPaneLayoutNode } from '../../shared/terminal-tab-types'
+import type { RuntimeSessionTabCloseReason } from '../../shared/runtime-session-contracts'
 
 export class OrcaRuntimeWithCloseHeadlessMobileTerminalTab extends OrcaRuntimeWithCloseStructuredAgentSessionTab {
-  protected closeHeadlessMobileTerminalTab(
+  protected async closeHeadlessMobileTerminalTab(
     worktreeId: string,
     snapshot: RuntimeMobileSessionTabsSnapshot,
     tab: RuntimeMobileSessionTerminalTab,
@@ -21,8 +22,10 @@ export class OrcaRuntimeWithCloseHeadlessMobileTerminalTab extends OrcaRuntimeWi
       allowMissingPersistedTab?: boolean
       killPtys?: boolean
       authorizedPty?: RuntimePtyWorktreeRecord
+      force?: boolean
+      reason?: RuntimeSessionTabCloseReason
     } = {}
-  ): void {
+  ): Promise<void> {
     const closedParentTabId = tab.parentTabId
     const retirementProofs = snapshot.tabs.flatMap((candidate) => {
       if (candidate.type !== 'terminal' || candidate.parentTabId !== closedParentTabId) {
@@ -35,11 +38,21 @@ export class OrcaRuntimeWithCloseHeadlessMobileTerminalTab extends OrcaRuntimeWi
       )
       return proof ? [proof] : []
     })
-    const projectedPtyIds = this.commitHeadlessTerminalTabRetirement(
+    const acknowledgeRetirement = this.captureTerminalTabRetirement(worktreeId, closedParentTabId)
+    const projectedPtyIds = await this.closeTerminalSurface(
       worktreeId,
-      closedParentTabId,
-      { allowMissing: options.allowMissingPersistedTab }
+      { kind: 'tab', tabId: closedParentTabId },
+      {
+        allowMissing: options.allowMissingPersistedTab,
+        force: options.force,
+        reason: options.reason
+      }
     )
+    if (!acknowledgeRetirement().matches) {
+      throw new Error('terminal_pane_owner_changed')
+    }
+    // Renderer frames may add other tabs while the durable close is in flight.
+    snapshot = this.mobileSessionTabsByWorktree.get(worktreeId) ?? snapshot
     this.clearRuntimeSessionOwnershipForMobileTab(worktreeId, snapshot, closedParentTabId)
     if (options.authorizedPty) {
       options.authorizedPty.runtimeSessionOwned = false
@@ -85,9 +98,12 @@ export class OrcaRuntimeWithCloseHeadlessMobileTerminalTab extends OrcaRuntimeWi
       return false
     })
     const active = nextTabs.find((candidate) => candidate.isActive) ?? nextTabs[0] ?? null
+    // A close is not a handover: the generation publishing this worktree still is. Minting an epoch
+    // here published a stranger for a worktree the renderer owns, and a client that retires what it
+    // displaces then rejected that renderer's own next frame. The sibling headless writers carry the
+    // stored epoch forward for the same reason; `...snapshot` is what does it here.
     const nextSnapshot: RuntimeMobileSessionTabsSnapshot = {
       ...snapshot,
-      publicationEpoch: `headless:${Date.now().toString(36)}`,
       snapshotVersion: snapshot.snapshotVersion + 1,
       activeTabId: active?.id ?? null,
       activeTabType: active?.type ?? null,
@@ -107,7 +123,7 @@ export class OrcaRuntimeWithCloseHeadlessMobileTerminalTab extends OrcaRuntimeWi
         : {}),
       tabs: nextTabs
     }
-    this.mobileSessionTabsByWorktree.set(worktreeId, nextSnapshot)
+    this.storeMobileSessionSnapshot(worktreeId, nextSnapshot)
     this.emitMobileSessionTabsSnapshot(nextSnapshot)
   }
 
@@ -168,6 +184,7 @@ export class OrcaRuntimeWithCloseHeadlessMobileTerminalTab extends OrcaRuntimeWi
       tabId: string
       root: TerminalPaneLayoutNode | null
       expandedLeafId: string | null
+      chatLeafId?: string | null
       titlesByLeafId?: Record<string, string>
     }
   ): Promise<{ updated: true }> {
@@ -193,6 +210,7 @@ export class OrcaRuntimeWithCloseHeadlessMobileTerminalTab extends OrcaRuntimeWi
         tabId: hostTabId,
         root: acceptedLayout.root,
         expandedLeafId: acceptedLayout.expandedLeafId,
+        chatLeafId: acceptedLayout.chatLeafId ?? null,
         ...(acceptedLayout.titlesByLeafId ? { titlesByLeafId: acceptedLayout.titlesByLeafId } : {})
       })
     }

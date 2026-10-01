@@ -42,8 +42,18 @@ export type DropHibernatedAgentPaneOptions = {
   retainedCompletionEvidence?: readonly RetainedAgentEntry[]
 }
 
+export type DropAgentStatusOptions = {
+  /** The pane itself is gone (pane close, stale-row teardown). Row-only dismissals leave the
+   *  cleared-at cutoff and manual-unread stamp in place so a still-live pane's next hook event
+   *  cannot resurrect activity the user already cleared. */
+  paneRemoved?: boolean
+}
+
 export type DropAgentStatusByTabPrefixOptions = {
   worktreeId?: string
+  /** Keep cleared-at cutoffs and manual-unread stamps: a mirrored-tab retraction is loss of
+   *  contact, not pane death, and the host republishes the same panes on reconnect. */
+  preserveActivityClearedState?: boolean
 }
 
 export type AgentLaunchConfigRegistrationMetadata = {
@@ -55,17 +65,6 @@ export type AgentLaunchConfigRegistrationMetadata = {
   providerSession?: AgentProviderSessionMetadata
 }
 
-export type AgentLaunchConfigStatusMetadata = {
-  paneKey: string
-  agentType?: AgentType
-  tabId?: string
-  terminalHandle?: string
-  launchToken?: string
-  providerSession?: AgentProviderSessionMetadata
-  existingProviderSession?: AgentProviderSessionMetadata
-  providerSessionChanged?: boolean
-}
-
 export type AgentLaunchConfigRegistryEntry = {
   launchConfig: SleepingAgentLaunchConfig
   registeredAt: number
@@ -73,6 +72,9 @@ export type AgentLaunchConfigRegistryEntry = {
 }
 
 export type AgentStatusPayload = ParsedAgentStatusPayload & {
+  subagentObservation?: AgentStatusEntry['subagentObservation']
+  /** The host's child views for a structured session; see `AgentStatusEntry.children`. */
+  children?: AgentStatusEntry['children']
   orchestration?: AgentStatusOrchestrationContext
   promptInteractionKey?: string
   restoredUnconfirmed?: boolean
@@ -82,10 +84,14 @@ export type AgentStatusPayload = ParsedAgentStatusPayload & {
 }
 
 export type AgentStatusTiming = {
+  /** Ordered authoritative sources may correct a prior publication clock. */
+  allowOlderTimestamp?: boolean
   updatedAt?: number
   /** Observation clock for staleness; see `AgentStatusEntry.evidenceObservedAt`. */
   evidenceObservedAt?: number
   stateStartedAt?: number
+  /** The host's turn start; see `AgentStatusEntry.turnStartedAt`. */
+  turnStartedAt?: number
 }
 
 export type AgentStatusRouting = {
@@ -96,6 +102,9 @@ export type AgentStatusRouting = {
 }
 
 export type AgentStatusMetadata = {
+  authorityRestartId?: string
+  /** Structured status rows remain fresh while the host owns the session; cleared on feed loss. */
+  structuredHostOwned?: true
   providerSession?: AgentProviderSessionMetadata
   launchConfig?: SleepingAgentLaunchConfig
   launchToken?: string

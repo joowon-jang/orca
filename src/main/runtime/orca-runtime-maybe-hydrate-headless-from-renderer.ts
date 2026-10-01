@@ -1,5 +1,7 @@
 // @ts-nocheck -- mechanically split from OrcaRuntimeService; behavior is covered by AST equivalence and characterization tests.
+import { splitFreebuffScreenUpdates } from '../../shared/freebuff-screen-status'
 import { OrcaRuntimeWithSerializeMainTerminalBuffer } from './orca-runtime-serialize-main-terminal-buffer'
+import { observeFreebuffTerminalStatus } from './freebuff-terminal-status'
 import { MOBILE_SUBSCRIBE_SCROLLBACK_ROWS } from './scrollback-limits'
 import { detectAgentStatusFromTitle, normalizeTerminalTitle } from '../../shared/agent-detection'
 import { shouldModelAnswerHiddenPtyQueries } from './terminal-model-query-authority'
@@ -51,12 +53,21 @@ export class OrcaRuntimeWithMaybeHydrateHeadlessFromRenderer extends OrcaRuntime
     // setting headlessTerminals, the live byte would lazy-create a separate
     // state and the seed-resolve would overwrite it, dropping live bytes.
     state.writeChain = state.writeChain.then(async () => {
+      if (this.headlessTerminals.get(ptyId) !== state) {
+        return
+      }
       try {
+        // Why the scrollback is not suppressed mid-TUI: the seed IS the model's
+        // normal buffer, so zeroing it while an alt-screen agent was up left the
+        // model with no pre-TUI history to restore from (#6106).
         const rendered = await controller.serializeBuffer!(ptyId, {
-          scrollbackRows: MOBILE_SUBSCRIBE_SCROLLBACK_ROWS,
-          altScreenForcesZeroRows: true
+          scrollbackRows: MOBILE_SUBSCRIBE_SCROLLBACK_ROWS
         })
-        if (!rendered || rendered.data.length === 0) {
+        if (
+          this.headlessTerminals.get(ptyId) !== state ||
+          !rendered ||
+          rendered.data.length === 0
+        ) {
           return
         }
         this.recordOsc7MetadataForPty(ptyId, rendered.data)
@@ -68,6 +79,9 @@ export class OrcaRuntimeWithMaybeHydrateHeadlessFromRenderer extends OrcaRuntime
           state.emulator.resize(rendered.cols, rendered.rows)
         }
         await state.emulator.write(rendered.data)
+        if (this.headlessTerminals.get(ptyId) !== state) {
+          return
+        }
         const ptyDims = this.getTerminalSize(ptyId)
         if (ptyDims && (ptyDims.cols !== rendered.cols || ptyDims.rows !== rendered.rows)) {
           state.emulator.resize(ptyDims.cols, ptyDims.rows)
@@ -89,7 +103,9 @@ export class OrcaRuntimeWithMaybeHydrateHeadlessFromRenderer extends OrcaRuntime
         // Hydration is best-effort. Live writes continue via the same
         // writeChain that this catch-arm leaves intact.
       } finally {
-        this.headlessHydrationState.set(ptyId, 'done')
+        if (this.headlessTerminals.get(ptyId) === state) {
+          this.headlessHydrationState.set(ptyId, 'done')
+        }
       }
     })
   }
@@ -157,7 +173,30 @@ export class OrcaRuntimeWithMaybeHydrateHeadlessFromRenderer extends OrcaRuntime
       // Why inside the chain: the ownership mirror must observe live bytes in
       // the same total order as seeds (seedOwner also runs on this chain).
       state.ownership.scan(data)
-      await state.emulator.write(data, { forwardQueryReplies })
+      for (const chunk of splitFreebuffScreenUpdates(data, state.emulator.partialEscapeTailAnsi)) {
+        await state.emulator.write(chunk, { forwardQueryReplies })
+        const pty = this.ptysById.get(ptyId)
+        if (pty && !pty.connectionId && this.headlessTerminals.get(ptyId) === state) {
+          const payload = observeFreebuffTerminalStatus(
+            state.emulator,
+            chunk,
+            this.terminalSpawnCommandsByPtyId.get(ptyId),
+            pty.launchAgent
+          )
+          if (payload) {
+            pty.lastExplicitAgentStatus = {
+              state: payload.state,
+              updatedAt: Date.now(),
+              sessionBoundary: payload.sessionBoundary
+            }
+            this.emitTerminalAgentStatusEvents(ptyId, {
+              cleanData: '',
+              payloads: [payload],
+              lastPayloadCleanOffset: null
+            })
+          }
+        }
+      }
       state.outputSequence = outputSequence
     })
     // Legacy callers remain best-effort; bounded SSH admission observes the raw receipt.

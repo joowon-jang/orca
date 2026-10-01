@@ -19,7 +19,9 @@
 import type { SshConnection } from './ssh-connection'
 import { shellEscape } from './ssh-connection-utils'
 import { RELAY_REMOTE_DIR } from './relay-protocol'
+import { SHORT_RELAY_SOCKET_DIR_PREFIX } from './relay-socket-path-limit'
 import { execCommand } from './ssh-relay-deploy-helpers'
+import { isUnconfirmedSshCommandTermination } from './ssh-relay-exec-command'
 import {
   describeRelayEndpointIncumbent,
   isReapableRelayHusk,
@@ -53,6 +55,8 @@ export type SupersededRelaySweepOptions = {
   currentRelayDir: string
   /** Stable per-target socket filename, from `relaySocketNameForInstanceId`. */
   sockName: string
+  /** Set only when this launch relocated its socket; that directory is never swept. */
+  currentShortSocketDir?: string
   nodePath: string
   signal?: AbortSignal
 }
@@ -63,15 +67,23 @@ export function supersededRelayEndpointListCommand(options: {
   remoteHome: string
   currentRelayDir: string
   sockName: string
+  currentShortSocketDir?: string
 }): string {
   return [
     `base=${shellEscape(`${options.remoteHome}/${RELAY_REMOTE_DIR}`)}`,
     `sock_name=${shellEscape(options.sockName)}`,
     `current=${shellEscape(options.currentRelayDir)}`,
-    'for sock in "$base"/relay-*/"$sock_name"; do',
+    // Why the second base: a host whose `$HOME` pushes the endpoint past `sun_path` binds
+    // under `/tmp/.orca-relay-<uid>/relay-<versionHash>/` instead (relay-socket-path-limit.ts).
+    // Those orphans are the same population this sweep exists to make visible, and the
+    // `$HOME` glob cannot see them. The uid is resolved on the host; the client never knows it.
+    `short_current=${shellEscape(options.currentShortSocketDir ?? '')}`,
+    `short_base="${SHORT_RELAY_SOCKET_DIR_PREFIX}$(id -u 2>/dev/null)"`,
+    'for sock in "$base"/relay-*/"$sock_name" "$short_base"/relay-*/"$sock_name"; do',
     '  [ -S "$sock" ] || continue',
     '  dir=${sock%/*}',
     '  [ "$dir" = "$current" ] && continue',
+    '  [ -n "$short_current" ] && [ "$dir" = "$short_current" ] && continue',
     '  printf \'%s\\n\' "$sock"',
     'done'
   ].join('\n')
@@ -79,7 +91,14 @@ export function supersededRelayEndpointListCommand(options: {
 
 /** Remove a socket inode proven to have no holder, so version-dir GC can reclaim the tree. */
 export function removeStaleRelayEndpointCommand(sockPath: string): string {
-  return `rm -f ${shellEscape(sockPath)}`
+  const remove = `rm -f ${shellEscape(sockPath)}`
+  if (!sockPath.startsWith(SHORT_RELAY_SOCKET_DIR_PREFIX)) {
+    return remove
+  }
+  // `gcOldRelayVersions` only walks `$HOME/.orca-remote`, so nothing else would ever
+  // reclaim a relocated version segment. `rmdir` fails while another target of the same
+  // build still has a socket there, which is exactly the condition for keeping it.
+  return `${remove}; rmdir ${shellEscape(sockPath.slice(0, sockPath.lastIndexOf('/')))} 2>/dev/null || true`
 }
 
 export function classifySupersededRelay(
@@ -100,6 +119,17 @@ export async function sweepSupersededRelayEndpoints(
   options: SupersededRelaySweepOptions
 ): Promise<SupersededRelayFinding[]> {
   if (isWindowsRemoteHost(hostPlatform)) {
+    // No pass runs here: a Windows endpoint is a named pipe with no inode to stat, so the
+    // `$HOME` glob cannot see it, and `probeRelayEndpointIncumbent` answers `unverifiable` for
+    // every Windows path anyway — nothing on this host could be classified, let alone reaped.
+    // The population is real all the same (`relayEndpointForHost` hashes the version dir into
+    // the pipe name, so an update strands the incumbent exactly as it does on POSIX), and with
+    // `--grace-time 0` it keeps its PTYs forever. Returning silently was the whole bug: this
+    // sweep exists to make that population visible, and on Windows it made it invisible.
+    console.warn(
+      `[ssh-relay] Superseded relay sweep did not run (Windows named-pipe endpoints are not enumerated); ` +
+        `any orphan from an earlier build would be neither listed nor reclaimed: current=${options.currentRelayDir}`
+    )
     return []
   }
   let listing: string
@@ -108,7 +138,17 @@ export async function sweepSupersededRelayEndpoints(
       wrapCommand: true,
       signal: options.signal
     })
-  } catch {
+  } catch (err) {
+    if (isUnconfirmedSshCommandTermination(err)) {
+      throw err
+    }
+    // Same reason the Windows arm logs: an abandoned pass and an empty host are the same return
+    // value, and only the log tells them apart.
+    console.warn(
+      `[ssh-relay] Superseded relay listing failed; no pass ran: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    )
     return []
   }
   const sockPaths = listing
@@ -118,20 +158,35 @@ export async function sweepSupersededRelayEndpoints(
     .slice(0, MAX_SWEPT_ENDPOINTS)
 
   const findings: SupersededRelayFinding[] = []
-  for (const sockPath of sockPaths) {
-    options.signal?.throwIfAborted()
-    const incumbent = await probeRelayEndpointIncumbent(
-      conn,
-      hostPlatform,
-      options.nodePath,
-      sockPath,
-      { signal: options.signal }
+  try {
+    for (const sockPath of sockPaths) {
+      options.signal?.throwIfAborted()
+      const incumbent = await probeRelayEndpointIncumbent(
+        conn,
+        hostPlatform,
+        options.nodePath,
+        sockPath,
+        { signal: options.signal }
+      )
+      findings.push({
+        sockPath,
+        outcome: await applySupersededRelayDecision(conn, incumbent, options),
+        incumbent
+      })
+    }
+  } catch (err) {
+    // Why log before rethrowing: a probe or a reap that throws on socket 2 of N already classified
+    // socket 1, and those lines are the whole point of this pass. Dropping them made a half-run
+    // sweep read exactly like a host with nothing to sweep — the same defect the Windows arm above
+    // has, one level down. The throw still propagates unchanged; the caller separates
+    // RelayProbeCleanupUnconfirmedError from the rest. The count says how much of the pass ran, and
+    // claims nothing about the endpoints it never reached.
+    logSupersededRelayFindings(findings)
+    console.warn(
+      `[ssh-relay] Superseded relay sweep stopped after ${findings.length} of ${sockPaths.length} ` +
+        `endpoints; the rest were not examined: ${err instanceof Error ? err.message : String(err)}`
     )
-    findings.push({
-      sockPath,
-      outcome: await applySupersededRelayDecision(conn, incumbent, options),
-      incumbent
-    })
+    throw err
   }
   logSupersededRelayFindings(findings)
   return findings
@@ -150,7 +205,10 @@ async function applySupersededRelayDecision(
         signal: options.signal
       })
       return 'stale-endpoint-removed'
-    } catch {
+    } catch (error) {
+      if (isUnconfirmedSshCommandTermination(error)) {
+        throw error
+      }
       return 'unverifiable'
     }
   }

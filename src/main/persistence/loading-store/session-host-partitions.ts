@@ -9,6 +9,7 @@ import {
 import { getDefaultWorkspaceSession } from '../../../shared/constants'
 import { pruneLocalTerminalScrollbackBuffers } from '../../../shared/workspace-session-terminal-buffers'
 import { pruneWorkspaceSessionBrowserHistory } from '../../../shared/workspace-session-browser-history'
+import { withoutRedundantGlobalFields } from '../../../shared/workspace-session-host-field-ownership'
 import { getRepoIdFromWorktreeId } from '../../../shared/worktree/id'
 import { readTerminalScrollbackSnapshotSync } from '../../terminal-scrollback-snapshots'
 import { preserveRuntimeAuthoredWorkspaceSessionFields } from '../runtime-authored-workspace-session-fields'
@@ -145,7 +146,10 @@ export function removeWorkspaceSessionOwnerInPartition(
       [resolved]: session
     }
   }
-  scheduleSave(owner[sessionHostPartitionOperationsContext].scheduling)
+  scheduleSave(
+    owner[sessionHostPartitionOperationsContext].scheduling,
+    resolved === LOCAL_EXECUTION_HOST_ID ? ['workspaceSession'] : ['workspaceSessionsByHostId']
+  )
 }
 
 export function partitionOwnsWorktreeTabs(
@@ -190,21 +194,28 @@ export function setHostWorkspaceSession(
       executionHostId: hostId
     }
   )
-  const pruned = pruneWorkspaceSessionBrowserHistory(
-    pruneLocalTerminalScrollbackBuffers(
-      session,
-      owner[sessionHostPartitionOperationsContext].runtime.state.repos
-    )
+  // Why here too: the load-side drop only survives until the next full snapshot write. A renderer
+  // or runtime payload that still carries local's globals would re-inject them into this partition.
+  const pruned = withoutRedundantGlobalFields(
+    pruneWorkspaceSessionBrowserHistory(
+      pruneLocalTerminalScrollbackBuffers(
+        session,
+        owner[sessionHostPartitionOperationsContext].runtime.state.repos
+      )
+    ),
+    owner[sessionHostPartitionOperationsContext].runtime.state.workspaceSession
   )
   owner[sessionHostPartitionOperationsContext].runtime.state.workspaceSessionsByHostId = {
     ...owner[sessionHostPartitionOperationsContext].runtime.state.workspaceSessionsByHostId,
     [hostId]: pruned
   }
-  scheduleSave(owner[sessionHostPartitionOperationsContext].scheduling)
+  scheduleSave(owner[sessionHostPartitionOperationsContext].scheduling, [
+    'workspaceSessionsByHostId'
+  ])
 }
 
 export function installSessionHostPartitionOperationsContext(
-  target: object,
+  target: SessionHostPartitionOperations,
   source: SessionHostPartitionOperations
 ): void {
   Object.defineProperty(target, sessionHostPartitionOperationsContext, {

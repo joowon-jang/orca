@@ -92,7 +92,7 @@ describe('useIpcEvents browser tab close routing', () => {
       getState: () => ({})
     })
 
-    closeTerminalListenerRef.current?.({ tabId: 'terminal-1' })
+    closeTerminalListenerRef.current?.({ kind: 'tab', tabId: 'terminal-1' })
 
     // The CLI/RPC caller is answered immediately, so this close must never raise a modal.
     expect(closeTerminalTabMock).toHaveBeenCalledWith('terminal-1', {
@@ -123,7 +123,8 @@ describe('useIpcEvents browser tab close routing', () => {
     listenerRef.current?.({
       requestId: 'close-1',
       tabId: 'terminal-1',
-      localPtyTeardownOwnedExternally: true
+      localPtyTeardownOwnedExternally: true,
+      force: true
     })
     await Promise.resolve()
 
@@ -131,6 +132,7 @@ describe('useIpcEvents browser tab close routing', () => {
       'terminal-1',
       expect.objectContaining({
         rejectPinned: true,
+        force: true,
         localPtyTeardownOwnedExternally: true
       })
     )

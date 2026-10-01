@@ -8,6 +8,7 @@ import { PTY_CONTROLLER_LIST_TIMEOUT_MS } from './orca-runtime-postlude'
 import { inferWorktreeIdFromPtyId } from './runtime-worktree-path-identity'
 import { getRegisteredSshState } from '../ssh/ssh-target-registry'
 import { LOCAL_EXECUTION_HOST_ID, toSshExecutionHostId } from '../../shared/execution-host'
+import { resolveWorktreeLaunchHost } from './worktree-launch-host-repo'
 import type { TuiAgent } from '../../shared/tui-agent'
 
 export class OrcaRuntimeWithTerminalCreateDeduplication extends OrcaRuntimeWithCreateAgentSession {
@@ -117,7 +118,7 @@ export class OrcaRuntimeWithTerminalCreateDeduplication extends OrcaRuntimeWithC
 
   protected getPtyExecutionHostMetadata(
     ptyId: string | null
-  ): Pick<RuntimeTerminalCreate, 'executionHostId' | 'hostPlatform'> {
+  ): Pick<RuntimeTerminalCreate, 'executionHostId' | 'hostPlatform' | 'incarnationId'> {
     if (!ptyId) {
       return {}
     }
@@ -129,11 +130,13 @@ export class OrcaRuntimeWithTerminalCreateDeduplication extends OrcaRuntimeWithC
       const remotePlatform = getRegisteredSshState(pty.connectionId)?.remotePlatform
       return {
         executionHostId: toSshExecutionHostId(pty.connectionId),
+        ...(pty.incarnationId ? { incarnationId: pty.incarnationId } : {}),
         ...(remotePlatform ? { hostPlatform: remotePlatform } : {})
       }
     }
     return {
       executionHostId: LOCAL_EXECUTION_HOST_ID,
+      ...(pty.incarnationId ? { incarnationId: pty.incarnationId } : {}),
       hostPlatform: pty.isWsl || pty.wslDistro ? 'linux' : process.platform
     }
   }
@@ -143,12 +146,17 @@ export class OrcaRuntimeWithTerminalCreateDeduplication extends OrcaRuntimeWithC
     opts: { agent: TuiAgent; prompt: string; title?: string }
   ): Promise<RuntimeTerminalCreate> {
     const worktree = await this.resolveWorktreeSelector(worktreeSelector)
-    const repo = this.store?.getRepo(worktree.repoId)
+    // Why: `getRepo(id)` is host-blind; the same repo id on two hosts must build the launch for the
+    // host that owns this worktree (#11163).
+    const resolution = resolveWorktreeLaunchHost(this.store?.getRepos() ?? [], worktree)
+    if (resolution.kind === 'ambiguous') {
+      throw new Error('worktree_execution_host_unresolved')
+    }
+    const repo = resolution.repo ?? this.store?.getRepo(worktree.repoId)
     if (!repo) {
       throw new Error('Repository for the selected workspace is no longer available.')
     }
     const startup = this.buildStartupForAgent(repo, opts.agent, opts.prompt)
-    await this.markWorkspaceTrustedForAgent(opts.agent, repo.connectionId, worktree.path)
     return await this.createTerminal(`id:${worktree.id}`, {
       command: startup.startup.command,
       env: startup.startup.env,

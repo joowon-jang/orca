@@ -35,6 +35,15 @@ vi.mock('./ssh-relay-deploy-helpers', () => ({
   execCommand: vi.fn()
 }))
 
+vi.mock('./ssh-relay-opencode-runtime', () => ({
+  ensureRemoteOpenCodeRuntime: vi.fn().mockResolvedValue('ready')
+}))
+vi.mock('./ssh-relay-ripgrep-install', () => ({
+  remoteRipgrepLayout: vi.fn().mockReturnValue(null),
+  recordRemoteRipgrepReference: vi.fn().mockResolvedValue(false),
+  ensureRemoteBundledRipgrep: vi.fn().mockResolvedValue(undefined)
+}))
+
 vi.mock('./ssh-remote-node-resolution', () => ({
   resolveRemoteNodePath: vi.fn().mockResolvedValue('/usr/bin/node')
 }))
@@ -138,7 +147,6 @@ describe('native-deps repair probe verdicts', () => {
       { reject: 'SSH channel closed unexpectedly' }, // health probe: unverifiable, not MISSING
       '', // launch namespace marker
       'DEAD',
-      '', // publish the per-launch credential
       'READY'
     ])
 
@@ -153,6 +161,11 @@ describe('native-deps repair probe verdicts', () => {
     expect(warnings().some((message) => message.includes('Repairing missing native deps'))).toBe(
       false
     )
+    // Why: the wrongful rebuild used to be the only visible symptom of a dropped exec channel.
+    expect(
+      warnings().some((message) => message.includes('Native deps probe unanswered')),
+      'an unanswered probe must still leave a trace'
+    ).toBe(true)
     expect(commands.some((command) => command.includes(NODE_PTY_RESET))).toBe(false)
     expect(commands.some((command) => command.includes(WATCHER_RESET))).toBe(false)
     expect(commands.some((command) => command.includes('npm install'))).toBe(false)
@@ -172,7 +185,6 @@ describe('native-deps repair probe verdicts', () => {
       'MISSING', // answered, no marker line: nothing here names a dep
       '', // launch namespace marker
       'DEAD',
-      '', // publish the per-launch credential
       'READY'
     ])
 
@@ -230,7 +242,6 @@ describe('native-deps repair probe verdicts', () => {
       '', // rm probe stderr
       NPTY_CLOEXEC_PATCHED,
       'DEAD',
-      '', // publish the per-launch credential
       'READY'
     ])
 
@@ -254,7 +265,6 @@ describe('native-deps repair probe verdicts', () => {
       '', // health probe: PowerShell swallowed the native failure, so nothing names a dep
       '', // no persisted active pipe marker
       'WAITING', // initial pipe probe
-      '', // publish the per-launch credential
       '', // WMI relay launch
       'READY', // readiness poll
       '' // persist active pipe marker
@@ -287,7 +297,6 @@ describe('native-deps repair probe verdicts', () => {
       '', // rm probe stderr
       NPTY_CLOEXEC_PATCHED,
       'DEAD',
-      '', // publish the per-launch credential
       'READY'
     ])
 
@@ -307,7 +316,6 @@ describe('native-deps repair probe verdicts', () => {
       'ORCA-NATIVE-DEPS-OK',
       '', // launch namespace marker
       'DEAD',
-      '', // publish the per-launch credential
       'READY'
     ])
 
@@ -331,7 +339,6 @@ describe('native-deps repair probe verdicts', () => {
       '', // rm probe stderr
       NPTY_CLOEXEC_PATCHED,
       'DEAD',
-      '', // publish the per-launch credential
       'READY'
     ])
 

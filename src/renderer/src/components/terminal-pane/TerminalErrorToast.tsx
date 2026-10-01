@@ -3,6 +3,10 @@ import { translate } from '@/i18n/i18n'
 import { resolveClientEnvironmentFooter } from '@/lib/client-environment-info'
 import { Button } from '@/components/ui/button'
 import { hasClientEnvironmentFooter } from '../../../../shared/client-environment-info'
+import {
+  localizeTerminalSpawnHints,
+  withoutTerminalSpawnIssueRequest
+} from './terminal-spawn-error-display'
 
 const SSH_PREFIX = 'SSH connection is not active'
 // Produced by pty-connection.ts reportError() when a PTY reattach can't reach its SSH host.
@@ -112,7 +116,7 @@ function humanizeUnreattachableSession(error: string): string {
 
 /** Swaps raw daemon-boundary codes for copy a user can act on. */
 export function humanizeTerminalError(error: string): string {
-  let humanized = error
+  let humanized = localizeTerminalSpawnHints(error)
   if (humanized.includes(PANE_OWNER_UNVERIFIED_MARKER)) {
     const explanation = isPaneOwnerUnverifiedError(humanized)
       ? translate(
@@ -178,7 +182,16 @@ export function TerminalErrorToast({
   // Restart cannot recover a session after its owning daemon exits.
   const showIssueLink =
     !ssh && !paneOwnerUnverified && !showDaemonRestart && !isExplainedTerminalError(error)
-  const displayError = humanizeTerminalError(error)
+  const humanizedError = humanizeTerminalError(error)
+  // Why: the toast appends its own linked request, so the host's plain-text one would repeat it.
+  const displayError = showIssueLink
+    ? withoutTerminalSpawnIssueRequest(humanizedError)
+    : humanizedError
+  const tint = paneOwnerUnverified
+    ? null
+    : ssh
+      ? 'color-mix(in srgb, var(--color-amber-500) 20%, var(--popover))'
+      : 'color-mix(in srgb, var(--destructive) 20%, var(--popover))'
   const [retrying, setRetrying] = useState(false)
   const [retryFailed, setRetryFailed] = useState(false)
   const [environmentFooter, setEnvironmentFooter] = useState<{
@@ -231,17 +244,14 @@ export function TerminalErrorToast({
         zIndex: 50,
         padding: '10px 14px',
         borderRadius: 6,
-        background: paneOwnerUnverified
-          ? 'var(--popover)'
-          : ssh
-            ? 'rgba(234, 179, 8, 0.12)'
-            : 'rgba(220, 38, 38, 0.15)',
+        background: 'var(--popover)',
+        backgroundImage: tint ? `linear-gradient(${tint}, ${tint})` : undefined,
         border: paneOwnerUnverified
           ? '1px solid var(--color-amber-500)'
           : ssh
             ? '1px solid rgba(234, 179, 8, 0.35)'
             : '1px solid rgba(220, 38, 38, 0.4)',
-        color: paneOwnerUnverified ? 'var(--popover-foreground)' : ssh ? '#fde68a' : '#fca5a5',
+        color: 'var(--popover-foreground)',
         fontSize: 12,
         fontFamily: 'monospace',
         whiteSpace: 'pre-wrap',
@@ -268,7 +278,7 @@ export function TerminalErrorToast({
               )}{' '}
               <a
                 href="https://github.com/stablyai/orca/issues"
-                style={{ color: '#fca5a5', textDecoration: 'underline' }}
+                style={{ color: 'inherit', textDecoration: 'underline' }}
               >
                 {translate(
                   'auto.components.terminal.pane.TerminalErrorToast.a7e2fd2699',
@@ -326,7 +336,7 @@ export function TerminalErrorToast({
           style={{
             background: 'none',
             border: 'none',
-            color: paneOwnerUnverified ? 'var(--popover-foreground)' : ssh ? '#fde68a' : '#fca5a5',
+            color: 'inherit',
             cursor: 'pointer',
             fontSize: 14,
             padding: '0 0 0 8px',

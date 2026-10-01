@@ -1,3 +1,4 @@
+import { qoderTitleStatus } from './qoder-terminal-title'
 import {
   AGY_AGENT_NAME_RE,
   BRAILLE_SPINNER_RE,
@@ -19,6 +20,7 @@ import {
   containsQuarterCircleSpinner,
   containsLegacyAgentName,
   isClaudeManagementTitle,
+  isDshTerminalTitle,
   isGeminiTerminalTitle,
   isPiAgentTitle,
   isPiTerminalTitle
@@ -32,6 +34,7 @@ import {
 import { clearPiStateWorkingMarker, getPiStateTitleStatus } from './pi-state-title-marker'
 import { getWrapperTitleSegments } from './terminal-title-wrapper-segments'
 import { isGrokRotatingWorkingTitle } from './terminal-title-agent-type'
+import { memoizeTitleClassification } from './terminal-title-classification-memo'
 
 /**
  * Strip working-status indicators so stale exit titles stop reporting working.
@@ -72,7 +75,7 @@ export function createAgentStatusTracker(
 ): {
   handleTitle: (title: string) => void
   seedTitle: (title: string) => void
-  restoreLastExit: () => AgentStatus | null
+  restoreLastExit: (confirmedStatus?: AgentStatus) => AgentStatus | null
   reset: () => void
 } {
   // Why: trackers restored mid-session need a last-known status without firing
@@ -108,8 +111,8 @@ export function createAgentStatusTracker(
       lastStatus = detectAgentStatusFromTitle(title)
       restorableExitStatus = null
     },
-    restoreLastExit(): AgentStatus | null {
-      const restoredStatus = lastStatus === null ? restorableExitStatus : null
+    restoreLastExit(confirmedStatus?: AgentStatus): AgentStatus | null {
+      const restoredStatus = confirmedStatus ?? (lastStatus === null ? restorableExitStatus : null)
       if (restoredStatus !== null) {
         lastStatus = restoredStatus
       }
@@ -127,6 +130,10 @@ export function createAgentStatusTracker(
  * Normalize high-churn agent titles into stable display labels before storage.
  */
 export function normalizeTerminalTitle(title: string): string {
+  const qoderStatus = qoderTitleStatus(title)
+  if (qoderStatus) {
+    return `${qoderStatus === 'working' ? '✦' : qoderStatus === 'permission' ? '▲' : '◇'} Qoder CLI`
+  }
   if (!title) {
     return title
   }
@@ -178,7 +185,11 @@ function canonicalizeBrailleSpinnerFrame(title: string): string {
   return canonical
 }
 
-export function detectAgentStatusFromTitle(title: string): AgentStatus | null {
+function computeAgentStatusFromTitle(title: string): AgentStatus | null {
+  const qoderStatus = qoderTitleStatus(title)
+  if (qoderStatus) {
+    return qoderStatus
+  }
   if (!title || isClaudeManagementTitle(title)) {
     return null
   }
@@ -197,14 +208,20 @@ export function detectAgentStatusFromTitle(title: string): AgentStatus | null {
     return piStateStatus
   }
 
-  if (title.includes(GEMINI_PERMISSION)) {
-    return 'permission'
-  }
-  if (title.includes(GEMINI_WORKING) || title.includes(GEMINI_SILENT_WORKING)) {
-    return 'working'
-  }
-  if (title.includes(GEMINI_IDLE)) {
-    return 'idle'
+  // Why the guard: DSH-TUI prefixes its title with `✦` while it is at REST, and that is
+  // Gemini's WORKING glyph. Reading it here made a finished DSH pane report working
+  // forever. DSH's own spinner prefixes are braille, which the spinner check below
+  // already covers, and its hooks are the authority either way.
+  if (!isDshTerminalTitle(title)) {
+    if (title.includes(GEMINI_PERMISSION)) {
+      return 'permission'
+    }
+    if (title.includes(GEMINI_WORKING) || title.includes(GEMINI_SILENT_WORKING)) {
+      return 'working'
+    }
+    if (title.includes(GEMINI_IDLE)) {
+      return 'idle'
+    }
   }
 
   // Why: resolve synthetic Pi/OMP permission/idle labels before the broader
@@ -261,6 +278,13 @@ export function detectAgentStatusFromTitle(title: string): AgentStatus | null {
 
   return 'idle'
 }
+
+/**
+ * Pure in `title`, so it is memoized on the title string: sidebar/tab selectors
+ * re-ask for the same unchanged titles on every store write.
+ */
+export const detectAgentStatusFromTitle: (title: string) => AgentStatus | null =
+  memoizeTitleClassification(computeAgentStatusFromTitle)
 
 /**
  * True when a quarter-circle spinner frame is the only agent evidence a title carries.

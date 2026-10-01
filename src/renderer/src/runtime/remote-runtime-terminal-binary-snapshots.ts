@@ -1,3 +1,4 @@
+import { RELEASE_SYNCHRONIZED_OUTPUT } from '../../../shared/terminal-mode-reset-profiles'
 import {
   TerminalStreamOpcode,
   decodeTerminalStreamText,
@@ -93,20 +94,32 @@ export abstract class RemoteRuntimeTerminalBinarySnapshots extends RemoteRuntime
             seq: info?.seq,
             kittyKeyboardFlags: info?.kittyKeyboardFlags,
             alternateScreen: info?.alternateScreen,
-            terminalOwner: info?.terminalOwner
+            terminalOwner: info?.terminalOwner,
+            // Why: the image encodes wraps and cursor moves against the host's
+            // grid, so the restorer must replay it there — the request path has
+            // always carried these; the pushes silently dropped them.
+            cols: info?.cols,
+            rows: info?.rows
           })
         } else if (target === 'recovery') {
           // Why: a server-pushed recovery snapshot replaces terminal state
           // mid-session; clear the screen and scrollback before applying it.
           // An empty snapshot is still applied so stale dropped output does
           // not linger on a terminal the model says is blank.
-          stream.callbacks.onSnapshot(`\x1b[2J\x1b[3J\x1b[H${data ?? ''}`, {
-            pendingEscapeTailAnsi: info?.pendingEscapeTailAnsi,
-            seq: info?.seq,
-            kittyKeyboardFlags: info?.kittyKeyboardFlags,
-            alternateScreen: info?.alternateScreen,
-            terminalOwner: info?.terminalOwner
-          })
+          // RELEASE_SYNCHRONIZED_OUTPUT: \x1b[2J does not clear mode 2026, so a pane
+          // holding an open latch would not paint this recovery snapshot at all.
+          stream.callbacks.onSnapshot(
+            `${RELEASE_SYNCHRONIZED_OUTPUT}\x1b[2J\x1b[3J\x1b[H${data ?? ''}`,
+            {
+              pendingEscapeTailAnsi: info?.pendingEscapeTailAnsi,
+              seq: info?.seq,
+              kittyKeyboardFlags: info?.kittyKeyboardFlags,
+              alternateScreen: info?.alternateScreen,
+              terminalOwner: info?.terminalOwner,
+              cols: info?.cols,
+              rows: info?.rows
+            }
+          )
         }
       } else if (matchesPendingRequest) {
         pendingRequest.resolve({

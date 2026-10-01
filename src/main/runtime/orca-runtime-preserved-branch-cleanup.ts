@@ -10,6 +10,8 @@ import type {
 } from './runtime-terminal-contracts'
 import type { TerminalSideEffectBatch } from '../../shared/terminal-side-effect-facts'
 import type { AgentStatusIpcPayload } from '../../shared/agent-status-types'
+import type { StructuredAgentSessionStatusSink } from '../native-chat/agent-session-wire/structured-agent-session-status-feed'
+import type { ObservedAgentStatusPaneIdentity } from '../ipc/agent-status-ipc-boundary'
 import type { AgentHookAuthorityAttestation } from '../agent-hooks/server'
 import type { RuntimeDesktopWindowStatus } from '../../shared/runtime-types'
 import type {
@@ -26,6 +28,8 @@ import { RuntimeAccountController } from './runtime-account-controller'
 import { RuntimeMobileSpeechCatalog } from './runtime-mobile-speech-catalog'
 import { RuntimeMobileDictationController } from './runtime-mobile-dictation-controller'
 import { RuntimeProjectHostSetupController } from './runtime-project-host-setup-controller'
+import { addRemoteRepoFromPath } from '../ipc/repos/remote-repo-registration'
+import type { Store } from '../persistence'
 import { RuntimeProjectGroupController } from './runtime-project-group-controller'
 import { RuntimeNestedRepoImport } from './runtime-nested-repo-import'
 import { RuntimeRepositoryRegistrationController } from './runtime-repository-registration-controller'
@@ -63,6 +67,12 @@ export class OrcaRuntimeWithPreservedBranchCleanup extends OrcaRuntimeWithTermin
 
   protected readonly getAgentStatusSnapshotFn: (() => AgentStatusIpcPayload[]) | null
 
+  protected readonly structuredAgentStatusSinkFn: StructuredAgentSessionStatusSink | null
+
+  protected readonly readObservedAgentStatusPaneIdentityFn: (
+    paneKey: string
+  ) => ObservedAgentStatusPaneIdentity
+
   protected readonly getAgentProviderSessionSnapshotFn: (() => AgentStatusIpcPayload[]) | null
 
   protected readonly getAgentProviderSessionRowsForPaneFn:
@@ -79,6 +89,10 @@ export class OrcaRuntimeWithPreservedBranchCleanup extends OrcaRuntimeWithTermin
     | null
 
   protected readonly retireAgentHookCompatibilityAuthorityFn: ((paneKey: string) => void) | null
+
+  protected readonly checkHookAgentPresenceFn:
+    | ((paneKey: string) => Promise<'live' | 'unverifiable' | 'exited' | null>)
+    | null
 
   protected readonly reconcileAgentStatusForEndedProcessFn:
     | ((paneKeys: Iterable<string>) => void)
@@ -97,10 +111,11 @@ export class OrcaRuntimeWithPreservedBranchCleanup extends OrcaRuntimeWithTermin
     | null
 
   protected readonly prepareCodexStructuredLaunchFn:
-    | ((input: {
-        workspacePath: string
-        launchEnv: NodeJS.ProcessEnv
-      }) => string | null | Promise<string | null>)
+    | ((input: { launchEnv: NodeJS.ProcessEnv }) => string | null | Promise<string | null>)
+    | null
+
+  protected readonly resolveCodexStructuredLaunchHomeFn:
+    | ((input: { launchEnv: NodeJS.ProcessEnv }) => string | null | Promise<string | null>)
     | null
 
   protected readonly agentSessionClaimSigner: AgentSessionClaimSigner
@@ -194,6 +209,17 @@ export class OrcaRuntimeWithPreservedBranchCleanup extends OrcaRuntimeWithTermin
     listRepos: () => this.listRepos(),
     addRepo: (path, kind, hostId) =>
       (this as RuntimeCommandSurfaceHost<this>).addRepo(path, kind, hostId),
+    addRemoteRepo: async (remote) => {
+      // The same registration the desktop IPC handler uses, so both surfaces agree on SSH hosts.
+      const result = await addRemoteRepoFromPath(this.requireStore() as unknown as Store, remote)
+      if ('error' in result) {
+        throw new Error(result.error)
+      }
+      this.invalidateResolvedWorktreeCache()
+      this.invalidateWorktreeScanCacheForRepo(result.repo.id)
+      this.notifyReposChanged()
+      return result.repo
+    },
     cloneRepo: (url, destination, hostId) =>
       (this as RuntimeCommandSurfaceHost<this>).cloneRepo(url, destination, hostId),
     invalidateResolvedWorktrees: () => this.invalidateResolvedWorktreeCache(),

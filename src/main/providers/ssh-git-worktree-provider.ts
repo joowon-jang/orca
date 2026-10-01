@@ -2,8 +2,15 @@ import type { GitStatusResult } from '../../shared/git-status-types'
 import type { RemoveWorktreeResult } from '../../shared/worktree/create-types'
 import type { GitWorktreeInfo } from '../../shared/worktree/types'
 import { CapabilityProbeCache } from '../../shared/capability-probe-cache'
+import { InFlightPromiseDedupe, stableInFlightKey } from '../../shared/in-flight-promise-dedupe'
 import { assertAuthoritativeWorktreeCatalog } from '../../shared/worktree/worktree-catalog-availability'
 import { isJsonRpcMethodNotFoundError } from './ssh-git-relay-errors'
+import {
+  parseLocalBaseBranchFastForwardOutcome,
+  readFastForwardableBehindCount,
+  type LocalBaseBranchFastForwardOutcome,
+  type LocalBaseBranchRefs
+} from '../../shared/worktree/local-base-branch-fast-forward'
 import { SshGitReviewHeadProvider } from './ssh-git-review-head-provider'
 
 const WORKTREE_IS_CLEAN_CAPABILITY = 'git.worktreeIsClean' as const
@@ -29,16 +36,35 @@ export class SshGitWorktreeProvider extends SshGitReviewHeadProvider {
   private readonly worktreeIsCleanCapabilityCache = new CapabilityProbeCache<
     typeof WORKTREE_IS_CLEAN_CAPABILITY
   >(Number.POSITIVE_INFINITY)
+  // Scoped to this provider instance, so two SSH hosts never share an entry.
+  private readonly worktreeListDedupe = new InFlightPromiseDedupe<GitWorktreeInfo[]>()
 
+  protected override invalidateGitReads(): void {
+    super.invalidateGitReads()
+    this.worktreeListDedupe.clear()
+  }
+
+  /** Un-signalled reads of one repo coalesce onto the request already in flight; nothing is cached. */
   async listWorktrees(
     repoPath: string,
     options?: { signal?: AbortSignal }
   ): Promise<GitWorktreeInfo[]> {
-    const response = await this.mux.request(
-      'git.listWorktrees',
-      { repoPath },
-      { signal: options?.signal }
+    // Why: same rule as shareWorktreeScan — one caller's abort must not cancel the scan its
+    // joiners are still waiting on, so a signalled read keeps its own request.
+    if (options?.signal) {
+      return this.requestWorktreeList(repoPath, options.signal)
+    }
+    return this.worktreeListDedupe.run(stableInFlightKey(['listWorktrees', repoPath]), () =>
+      this.requestWorktreeList(repoPath)
     )
+  }
+
+  /** The one real relay round trip a coalesced read's joiners all wait on. */
+  private async requestWorktreeList(
+    repoPath: string,
+    signal?: AbortSignal
+  ): Promise<GitWorktreeInfo[]> {
+    const response = await this.mux.request('git.listWorktrees', { repoPath }, { signal })
     // Why (#14004): relays before this fix answered a failed worktree scan with `[]`. Mixed versions are
     // normal, so refuse the shape here too — a Git repo always lists its own checkout.
     return assertAuthoritativeWorktreeCatalog<GitWorktreeInfo>(response, repoPath)
@@ -114,16 +140,24 @@ export class SshGitWorktreeProvider extends SshGitReviewHeadProvider {
     )
   }
 
-  async refreshLocalBaseRefForWorktreeCreate(args: {
-    repoPath: string
-    fullRef: string
-    remoteTrackingRef: string
-    ownerWorktreePath?: string
-    checkOnly?: boolean
-  }): Promise<void> {
-    await this.runWithGitReadInvalidation(async () => {
-      await this.mux.request('git.refreshLocalBaseRefForWorktreeCreate', args)
-    })
+  /** The relay inspects and moves the branch host-side, one run per branch at a time. */
+  async refreshLocalBaseRefForWorktreeCreate(
+    args: LocalBaseBranchRefs
+  ): Promise<LocalBaseBranchFastForwardOutcome> {
+    return this.runWithGitReadInvalidation(async () =>
+      parseLocalBaseBranchFastForwardOutcome(
+        await this.mux.request('git.refreshLocalBaseRefForWorktreeCreate', args)
+      )
+    )
+  }
+
+  /** Commits local is behind when the relay could fast-forward it; read-only. */
+  async getLocalBaseRefFastForwardableBehind(
+    args: LocalBaseBranchRefs
+  ): Promise<number | undefined> {
+    return readFastForwardableBehindCount(
+      await this.mux.request('git.inspectLocalBaseRefForWorktreeCreate', args)
+    )
   }
 
   async renameCurrentBranch(worktreePath: string, newBranch: string): Promise<void> {

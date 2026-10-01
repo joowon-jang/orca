@@ -4,6 +4,7 @@ import { elementScroll, useVirtualizer, type Virtualizer } from '@tanstack/react
 import type { ProgrammaticScrollMarks } from '@/hooks/programmatic-scroll-marks'
 import type { DiffSection } from '../../diff-section-types'
 import { getDiffSectionRowEstimatedHeight } from '../../diff-section-layout'
+import { getCombinedDiffRenderRange } from './combined-diff-render-range'
 
 const COMBINED_DIFF_OVERSCAN = 5
 
@@ -11,6 +12,7 @@ export function useCombinedDiffVirtualizer({
   generation,
   programmaticScrollMarks,
   renderedIndicesRef,
+  rowKeys,
   scrollContainerRef,
   scrollOffsetRef,
   sectionHeights,
@@ -20,23 +22,28 @@ export function useCombinedDiffVirtualizer({
   generation: number
   programmaticScrollMarks: ProgrammaticScrollMarks
   renderedIndicesRef: React.RefObject<Set<number>>
+  rowKeys: readonly string[]
   scrollContainerRef: React.RefObject<HTMLDivElement | null>
   scrollOffsetRef: React.RefObject<number>
   sectionHeights: Record<number, number>
   sections: DiffSection[]
   sideBySide: boolean
 }): Virtualizer<HTMLDivElement, Element> {
+  const estimateSize = (index: number): number => {
+    const section = sections[index]
+    return section ? getDiffSectionRowEstimatedHeight(section, sectionHeights[index]) : 88
+  }
   const virtualizer = useVirtualizer({
     count: sections.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: (index) => {
-      const section = sections[index]
-      if (!section) {
-        return 88
-      }
-
-      return getDiffSectionRowEstimatedHeight(section, sectionHeights[index])
-    },
+    estimateSize,
+    // Offscreen Monaco sections render their full height; bound that work by pixels, too.
+    rangeExtractor: (range) =>
+      getCombinedDiffRenderRange(
+        range,
+        estimateSize,
+        scrollContainerRef.current?.clientHeight ?? 0
+      ),
     overscan: COMBINED_DIFF_OVERSCAN,
     initialOffset: () => scrollOffsetRef.current,
     // Why: mark every virtualizer-issued scroll so events are attributed to the user only when this code didn't cause them.
@@ -48,14 +55,9 @@ export function useCombinedDiffVirtualizer({
       }
       elementScroll(offset, options, instance)
     },
-    getItemKey: (index) => {
-      const section = sections[index]
-      if (!section) {
-        return `${index}:${generation}`
-      }
-      // Why: contentGeneration is per-section, so a single row's reload remounts only that row.
-      return `${section.key}:${section.collapsed ? 'collapsed' : 'expanded'}:${generation}:${section.contentGeneration ?? 0}`
-    }
+    // Why: TanStack re-runs getItemKey for every index on each measurement pass, so the key is
+    // pre-built once per section change instead of a template string per index per pass.
+    getItemKey: (index) => rowKeys[index] ?? `${index}:${generation}`
   })
 
   // Why: keep render pure (React Doctor); retrySection still needs the on-screen set without the virtualizer as a dep.

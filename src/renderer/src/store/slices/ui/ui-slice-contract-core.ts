@@ -99,6 +99,9 @@ export type NewWorkspaceDraft = {
   linkedGitLabMR?: number | null
   // Why: repo-scoped start ref from the "Start from" picker; absent means "use the repo's effective base ref".
   baseBranch?: string
+  // Why: false when `baseBranch` came from the base-ref picker rather than a branch pick, so restoring the
+  // draft doesn't turn it back into a name-field pill. Absent on pre-flag drafts, which restore as a pick.
+  baseBranchNamesWorkspace?: boolean
   // Why: review worktrees start from a head ref/SHA while Source Control compares against the provider target branch.
   compareBaseRef?: string
 }
@@ -133,6 +136,12 @@ export type UISliceCore = {
   acknowledgedAgentsByPaneKey: Record<string, number>
   acknowledgeAgents: (paneKeys: string[]) => void
   unacknowledgeAgents: (paneKeys: string[]) => void
+  /** Per-pane cutoffs used to hide activity entries cleared by the user. */
+  activityClearedAtByPaneKey: Record<string, number>
+  applyActivityClearedAt: (patch: Record<string, number | null>) => void
+  /** Session-local protection for turns explicitly marked unread. */
+  manuallyUnreadTurnsByPaneKey: Record<string, number>
+  clearManuallyUnreadTurns: (paneKeys: string[]) => void
   activeView: TopLevelView
   previousViewBeforeTasks: Exclude<UiViewHistory, 'tasks'>
   previousViewBeforeSettings: Exclude<UiViewHistory, 'settings'>

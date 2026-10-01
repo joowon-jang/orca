@@ -36,7 +36,10 @@ export type RemoteWatcherState = {
   batch: RemoteWatcherEventBatch
 }
 
-export type RemoteWatcherInstallResult = 'installed' | 'unavailable' | 'cancelled'
+// Why 'capacity' is not 'unavailable': the relay refused because its watch-root cap is full, which is
+// a decision, not a fault. The 1 Hz unavailable retry cannot change that answer, and a folder
+// workspace whose repo count exceeds the cap turns it into a permanent per-root storm (#11196).
+export type RemoteWatcherInstallResult = 'installed' | 'unavailable' | 'capacity' | 'cancelled'
 
 export type RemoteWatcherResyncState = {
   lastSentAt: number
@@ -62,7 +65,7 @@ export const watcherLifecycleState = {
   watchedRoots: new Map<string, WatchedRoot>(),
   unwatchableRoots: new Set<string>(),
   // Why: key cleanup by sender WebContents (not per root) to avoid MaxListeners warnings when a workspace has many worktrees open.
-  senderCleanupRegistered: new Set<number>(),
+  senderLifetimes: new Map<number, { signal: AbortSignal; dispose: () => void }>(),
   pendingTeardowns: new Map<string, ReturnType<typeof setTimeout>>(),
   // Why: @parcel/watcher unsubscribe does native async work that sender-destroy can start before shutdown, so will-quit must still await it.
   pendingLocalUnsubscribes: new Set<Promise<void>>(),

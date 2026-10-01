@@ -15,7 +15,6 @@ export type FloatingPanelStoreState = {
   activeGroupIdByWorktree: Record<string, string | null>
   activeTabIdByWorktree: Record<string, string | null>
   expandedPaneByTabId: Record<string, boolean>
-  renamingTabId: string | null
   createTab: (
     worktreeId: string,
     groupId?: string,
@@ -39,10 +38,10 @@ export type FloatingPanelStoreState = {
   closeFile: (fileId: string) => void
   closeUnifiedTab: (tabId: string) => Tab | null
   markFileDirty: (fileId: string, dirty: boolean) => void
+  clearEditorDraft: (fileId: string) => void
   activateTab: (tabId: string) => void
   setActiveTab: (tabId: string) => void
   setTabCustomTitle: (tabId: string, title: string | null) => void
-  setRenamingTabId: (tabId: string | null) => void
   setTabColor: (tabId: string, color: string | null) => void
   setTabPaneExpanded: (tabId: string, expanded: boolean) => void
   makePreviewFilePermanent: (fileId: string, tabId?: string) => void

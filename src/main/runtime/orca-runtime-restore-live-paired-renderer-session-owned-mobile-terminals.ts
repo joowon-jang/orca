@@ -39,7 +39,7 @@ export class OrcaRuntimeWithRestoreLivePairedRendererSessionOwnedMobileTerminals
         continue
       }
       if (!existing) {
-        this.mobileSessionTabsByWorktree.set(targetWorktreeId, {
+        this.storeMobileSessionSnapshot(targetWorktreeId, {
           worktree: targetWorktreeId,
           publicationEpoch: `renderer-rescue:${Date.now().toString(36)}`,
           snapshotVersion: 0,
@@ -123,9 +123,9 @@ export class OrcaRuntimeWithRestoreLivePairedRendererSessionOwnedMobileTerminals
     if (!pty || this.terminalSpawnCommandsByPtyId.has(pty.ptyId)) {
       return
     }
-    if (this.ptyController?.write(pty.ptyId, command)) {
+    if (this.ptyController?.write(pty.ptyId, command, 'launch')) {
       // Why: Enter rides its own write so a long command cannot swallow it.
-      this.ptyController.write(pty.ptyId, '\r')
+      this.ptyController.write(pty.ptyId, '\r', 'launch')
       this.noteTerminalSpawnCommand(pty.ptyId, command)
     }
   }

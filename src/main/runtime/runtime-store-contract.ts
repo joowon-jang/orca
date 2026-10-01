@@ -48,6 +48,7 @@ export type RuntimeStore = {
   getWorkspaceSession?: Store['getWorkspaceSession']
   getWorkspaceSessionHostIds?: Store['getWorkspaceSessionHostIds']
   setWorkspaceSession?: Store['setWorkspaceSession']
+  runDurableMutation?: Store['runDurableMutation']
   flushOrThrow?: Store['flushOrThrow']
   flushPendingOrThrowAsync?: Store['flushPendingOrThrowAsync']
   persistPtyBinding?: Store['persistPtyBinding']
@@ -61,6 +62,7 @@ export type RuntimeStore = {
   automationOwnerPrecondition?: Store['automationOwnerPrecondition']
   automationChangeSelector?: Store['automationChangeSelector']
   listAutomationRuns?: Store['listAutomationRuns']
+  listAutomationRunsPage?: Store['listAutomationRunsPage']
   createAutomation?: Store['createAutomation']
   updateAutomation?: Store['updateAutomation']
   deleteAutomation?: Store['deleteAutomation']
@@ -86,6 +88,10 @@ export type RuntimeStore = {
     terminalWindowsShell?: GlobalSettings['terminalWindowsShell']
     floatingTerminalEnabled?: GlobalSettings['floatingTerminalEnabled']
     agentStatusHooksEnabled?: GlobalSettings['agentStatusHooksEnabled']
+    terminalCopyTrimsGutter?: GlobalSettings['terminalCopyTrimsGutter']
+    experimentalNativeChat?: GlobalSettings['experimentalNativeChat']
+    openAgentTabsInChatByDefault?: GlobalSettings['openAgentTabsInChatByDefault']
+    experimentalStructuredNativeChat?: GlobalSettings['experimentalStructuredNativeChat']
     defaultTaskSource?: GlobalSettings['defaultTaskSource']
     defaultTaskViewPreset?: GlobalSettings['defaultTaskViewPreset']
     visibleTaskProviders?: GlobalSettings['visibleTaskProviders']
@@ -96,6 +102,7 @@ export type RuntimeStore = {
     compactWorktreeCards?: GlobalSettings['compactWorktreeCards']
     minimaxGroupId?: GlobalSettings['minimaxGroupId']
     minimaxUsageModels?: GlobalSettings['minimaxUsageModels']
+    minimaxEndpoint?: GlobalSettings['minimaxEndpoint']
     prBotAuthorOverrides?: GlobalSettings['prBotAuthorOverrides']
     artifactSharingEnabled?: GlobalSettings['artifactSharingEnabled']
     terminalQuickCommands?: GlobalSettings['terminalQuickCommands']
@@ -103,6 +110,7 @@ export type RuntimeStore = {
     mobileAutoRestoreFitMs?: number | null
     mobileEmulatorEnabled?: boolean
     mobileEmulatorDefaultDeviceUdid?: string | null
+    machineName?: GlobalSettings['machineName']
     voice?: VoiceSettings
     claudeAgentTeamsMode?: GlobalSettings['claudeAgentTeamsMode']
     // Why: Phase-5 query responder kill switches — read per chunk in
@@ -111,7 +119,14 @@ export type RuntimeStore = {
     terminalHiddenDeliveryGate?: GlobalSettings['terminalHiddenDeliveryGate']
     terminalModelQueryAuthority?: GlobalSettings['terminalModelQueryAuthority']
     worktreeVisibilityDefaults?: GlobalSettings['worktreeVisibilityDefaults']
+    hostSettingOverrides?: GlobalSettings['hostSettingOverrides']
     agentSkillSharingEnabled?: GlobalSettings['agentSkillSharingEnabled']
+    nativeChatSessionOptions?: GlobalSettings['nativeChatSessionOptions']
+    nativeChatInheritShellEnvironment?: GlobalSettings['nativeChatInheritShellEnvironment']
+    nativeChatShellEnvironmentVariables?: GlobalSettings['nativeChatShellEnvironmentVariables']
+    aiVaultSearch?: GlobalSettings['aiVaultSearch']
+    sourceControlAi?: GlobalSettings['sourceControlAi']
+    commitMessageAi?: GlobalSettings['commitMessageAi']
   }
   // Why: narrow to `unknown` return so test mocks can return void without
   // a cast. The runtime never reads the return value — the persisted value
@@ -120,4 +135,5 @@ export type RuntimeStore = {
     updates: Partial<GlobalSettings>,
     options?: { notifyListeners?: boolean; originWebContentsId?: number }
   ) => unknown
+  onSettingsChanged?: Store['onSettingsChanged']
 }
