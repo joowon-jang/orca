@@ -1,3 +1,4 @@
+import './rpc/unused-default-rpc-methods.test-fixture'
 // One structured Codex session driven end to end over `agentSession.*`.
 //
 // Nothing here is stubbed except the Codex child itself: the RPC dispatcher, the
@@ -43,6 +44,7 @@ import {
   ensureStructuredAgentSessionHost,
   stopStructuredAgentSessionRuntime
 } from './structured-agent-session-runtime'
+import { createStructuredAgentSessionLogger } from '../native-chat/agent-session-wire/structured-agent-session-logger'
 
 const journals = createTrackedJournalOpener()
 
@@ -330,6 +332,7 @@ beforeEach(async () => {
     publishStructuredAgentSessionTab: () => {},
     ensureStructuredAgentSessionHost: () =>
       ensureStructuredAgentSessionHost({
+        logger: createStructuredAgentSessionLogger(),
         stateDirectory: root,
         hostId: 'local',
         claimKeyId: 'key-1',
@@ -352,11 +355,9 @@ beforeEach(async () => {
         openCodexConnection: codex.openConnection,
         readProcessStartTime: async () => 1_700_000_000_000
       }).then(() => undefined),
-    registerOwnedSubscriptionCleanup: vi.fn((_id: string, dispose: () => void) => {
-      return {
-        releaseIfCurrent: dispose
-      }
-    })
+    registerOwnedSubscriptionCleanup: vi.fn((_id: string, dispose: () => void) => ({
+      releaseIfCurrent: dispose
+    }))
   }
   dispatcher = new RpcDispatcher({
     runtime: runtime as unknown as OrcaRuntimeService,
@@ -457,6 +458,8 @@ describe('a structured codex session over agentSession.*', () => {
       CODEX_HOME: '/home/dev/.codex'
     })
     const store = await readPersistedTestAgentSessionStoreText(root)
+    // The record this create wrote, so the checks below read the runtime's own rows.
+    expect(store).toContain('/home/dev/.codex')
     expect(store).not.toContain('EXAMPLE_GATEWAY_TOKEN')
     expect(store).not.toContain('"launchEnv"')
     const stream = await subscribe('sub-first-send')

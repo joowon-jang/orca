@@ -1,3 +1,4 @@
+import '../unused-default-rpc-methods.test-fixture'
 // `agentSession.hold` / `release` are kept answering for clients that still send them, and do
 // nothing else: a view never starts or keeps an agent.
 //
@@ -28,6 +29,7 @@ import { STRUCTURED_AGENT_SESSION_METHODS } from './structured-agent-session'
 import { agentSessionFailureFact } from '../../../../shared/agent-session-failure'
 import { agentSessionFailureWords } from '../../../../shared/agent-session-failure-words'
 import { openTestJournalHostDatabase } from '../../../native-chat/agent-session-journal/journal-host-database-test-support'
+import { createStructuredAgentSessionLogger } from '../../../native-chat/agent-session-wire/structured-agent-session-logger'
 
 const CONNECTION = 'connection-1'
 const CLIENT = {
@@ -78,6 +80,7 @@ beforeEach(async () => {
   }))
   store = await openTestAgentSessionRecordStore(root)
   host = new StructuredAgentSessionHost({
+    logger: createStructuredAgentSessionLogger(),
     store,
     adapter: {
       acquire,
@@ -123,7 +126,7 @@ afterEach(async () => {
 
 describe('the hold surface, for clients that still call it', () => {
   it('answers a hold without starting an agent or registering a cleanup', async () => {
-    await host.close(SESSION)
+    await host.close(SESSION, 'evict')
     expect(host.hasSession(SESSION)).toBe(false)
     const registered = vi.spyOn(runtime, 'registerOwnedSubscriptionCleanup')
     const acquiresBefore = acquire.mock.calls.length
@@ -150,12 +153,12 @@ describe('the hold surface, for clients that still call it', () => {
     expect(host.hasSession(SESSION)).toBe(true)
   })
 
-  it('refuses a hold once the setting is off, and still answers a release', async () => {
+  it('answers a hold and a release whatever the host structured-chat setting says', async () => {
     structuredNativeChatEnabled = false
 
     expect(
       await call('agentSession.hold', { sessionId: SESSION, holderId: 'chat-1' })
-    ).toMatchObject({ ok: false })
+    ).toMatchObject({ ok: true, result: { held: true } })
     expect(
       await call('agentSession.release', { sessionId: SESSION, holderId: 'chat-1' })
     ).toMatchObject({ ok: true, result: { released: true } })
@@ -163,7 +166,7 @@ describe('the hold surface, for clients that still call it', () => {
   })
 
   it('answers a hold even when no agent could be started', async () => {
-    await host.close(SESSION)
+    await host.close(SESSION, 'evict')
     acquire.mockRejectedValue(new Error('provider unavailable'))
     const acquiresBefore = acquire.mock.calls.length
 
@@ -176,7 +179,7 @@ describe('the hold surface, for clients that still call it', () => {
 
 describe('a stream', () => {
   it('reads a closed conversation without starting its agent', async () => {
-    await host.close(SESSION)
+    await host.close(SESSION, 'evict')
     expect(host.hasSession(SESSION)).toBe(false)
     const acquiresBefore = acquire.mock.calls.length
     const frames: unknown[] = []

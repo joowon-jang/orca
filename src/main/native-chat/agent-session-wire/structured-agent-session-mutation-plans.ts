@@ -3,9 +3,12 @@
 //
 // The replay half matters more than it looks. The ledger records only that an
 // operation happened, so the durable answer usually comes back out of the
-// journal. Send is fail-closed: admission alone cannot prove non-delivery.
+// journal. Send is fail-closed: admission alone cannot prove non-delivery, so
+// its success commits with the row that accepts it, and a row still pending is
+// one that wrote nothing.
 
 import type { AgentJournalMessageItem } from '../../../shared/agent-session-journal-types'
+import type { AgentChildWorkView } from '../../../shared/agent-status-child-work-view'
 import type { AgentSessionOperationOutcome } from '../../../shared/agent-session-operation-ledger'
 import type {
   AgentSessionCancelResult,
@@ -48,13 +51,25 @@ export type MutationPlan<TValue> = {
   operationIdScope?: 'global'
   /** Admitted without the writer lease: see `admitAgentSessionMutation`. */
   conversationWrite?: true
-  markUnknownBeforeRun?: boolean
+  /** Still runs, decided from the committed ledger, when its ledger row cannot be written. */
+  runsWithoutLedgerRow?: true
   run: (ctx: AgentSessionTurnContext) => Promise<TurnOutcome<TValue>>
   replay: (ctx: AgentSessionTurnContext, outcome: AgentSessionOperationOutcome) => TValue | null
   rerunWhenReplayMissing?: (ctx: AgentSessionTurnContext) => boolean
   recoverUnknownFromDurableState?: boolean
-  settledOutcome?: (value: TValue) => AgentSessionOperationOutcome
-}
+} & (
+  | {
+      /** Its success is the row its run writes, so it commits in that row's transaction
+       *  (`AgentSessionTurnContext.operationReceipt`): a row left pending wrote nothing. That
+       *  success is fixed before the value exists, so it records no `settledOutcome`. */
+      settlesWithWrite: true
+      settledOutcome?: never
+    }
+  | {
+      settlesWithWrite?: never
+      settledOutcome?: (value: TValue) => AgentSessionOperationOutcome
+    }
+)
 
 export function sendPlan(params: {
   envelope: AgentSessionMutationEnvelope
@@ -71,7 +86,7 @@ export function sendPlan(params: {
     method: 'agentSession.send',
     operationIdScope: 'global',
     conversationWrite: true,
-    markUnknownBeforeRun: true,
+    settlesWithWrite: true,
     // `delivery` joins the OPERATION fingerprint only; the submission row keeps
     // the body-only fingerprint the reducer's echo-aliasing recomputes.
     fields: { body: params.body, ...(params.delivery ? { delivery: params.delivery } : {}) },
@@ -101,7 +116,9 @@ export function sendPlan(params: {
       if (submission) {
         return { clientMessageId, submission }
       }
-      if (outcome.status === 'failed') {
+      // A pending row wrote nothing, so the send runs for the first time. Succeeded: accepted,
+      // then a new epoch dropped its row. Unknown: only builds before this one wrote that.
+      if (outcome.status === 'failed' || outcome.status === 'pending') {
         return null
       }
       const resolvedAt = ctx.now()
@@ -138,7 +155,7 @@ export function conversationCommandPlan(params: {
   return {
     method: 'agentSession.conversationCommand',
     conversationWrite: true,
-    markUnknownBeforeRun: true,
+    settlesWithWrite: true,
     fields: { command: STRUCTURED_AGENT_SESSION_COMPACT_COMMAND },
     recoverUnknownFromDurableState: true,
     run: async (ctx) => {
@@ -170,12 +187,15 @@ export function cancelPlan(params: {
   scope?: 'background-tasks'
   taskId?: string
   prompt?: { itemId: string; expectedRevision: number }
-  stopChild?: () => Promise<void>
+  /** The session's child records, which name the tasks a background Stop reaches. */
+  childWork?: () => readonly AgentChildWorkView[] | undefined
 }): MutationPlan<AgentSessionCancelResult> {
   return {
     method: 'agentSession.cancel',
     // Stop is a conversation write; a prompt or background-task cancel needs the live child.
     ...(params.scope || params.prompt ? {} : { conversationWrite: true as const }),
+    // A Stop must reach the agent even when storage refuses the row recording it.
+    runsWithoutLedgerRow: true,
     fields: {
       ...(params.turnId !== undefined ? { turnId: params.turnId } : {}),
       ...(params.scope ? { scope: params.scope } : {}),
@@ -189,7 +209,7 @@ export function cancelPlan(params: {
         ...(params.scope ? { scope: params.scope } : {}),
         ...(params.taskId ? { taskId: params.taskId } : {}),
         ...(params.prompt ? { prompt: params.prompt } : {}),
-        ...(params.stopChild ? { stopChild: params.stopChild } : {})
+        ...(params.childWork ? { childWork: params.childWork } : {})
       }),
     // Interrupting twice would kill a turn the client never asked to stop, so a
     // replay reports the turn as already handled.

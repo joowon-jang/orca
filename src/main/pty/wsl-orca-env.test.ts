@@ -276,7 +276,7 @@ describe('stampPtyTreeIdMarker', () => {
     'skips the unusable marker %p',
     (sessionId) => {
       const env: Record<string, string> = {}
-      expect(stampPtyTreeIdMarker(env, sessionId as string)).toBe(false)
+      expect(stampPtyTreeIdMarker(env, sessionId)).toBe(false)
       expect(env[ORCA_PTY_TREE_ID_ENV]).toBeUndefined()
     }
   )

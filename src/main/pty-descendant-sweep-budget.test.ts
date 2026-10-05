@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { killWithDescendantSweep } from './pty-descendant-termination'
-import type { WindowsTreeKillTarget } from './windows-pty-root-identity'
+import type {
+  verifyWindowsTreeKillTarget,
+  WindowsTreeKillTarget
+} from './windows-pty-root-identity'
 
-const verifyWindowsTreeKillTargetMock = vi.hoisted(() => vi.fn())
+const verifyWindowsTreeKillTargetMock = vi.hoisted(() =>
+  vi.fn<typeof verifyWindowsTreeKillTarget>()
+)
 vi.mock('./windows-pty-root-identity', () => ({
   verifyWindowsTreeKillTarget: verifyWindowsTreeKillTargetMock,
   WINDOWS_ROOT_IDENTITY_TIMEOUT_MS: 3000
@@ -250,10 +255,7 @@ describe('killWithDescendantSweep outer deadline', () => {
       sweepTimeoutMs: 4000
     })
     expect(verifyWindowsTreeKillTargetMock).toHaveBeenCalledOnce()
-    const [, opts] = verifyWindowsTreeKillTargetMock.mock.calls[0] as [
-      number,
-      { timeoutMs: number; expectedCreationTimeMs?: number }
-    ]
+    const [, opts = {}] = verifyWindowsTreeKillTargetMock.mock.calls[0]
     expect(opts.expectedCreationTimeMs).toBe(1234)
     expect(opts.timeoutMs).toBeLessThanOrEqual(3000)
   })
@@ -265,10 +267,7 @@ describe('killWithDescendantSweep outer deadline', () => {
       killWindowsTree: vi.fn().mockResolvedValue(undefined)
     })
     expect(verifyWindowsTreeKillTargetMock).toHaveBeenCalledOnce()
-    const [, opts] = verifyWindowsTreeKillTargetMock.mock.calls[0] as [
-      number,
-      { expectedCreationTimeMs?: number }
-    ]
+    const [, opts = {}] = verifyWindowsTreeKillTargetMock.mock.calls[0]
     expect(opts.expectedCreationTimeMs).toBeUndefined()
   })
 })

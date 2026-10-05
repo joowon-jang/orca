@@ -246,6 +246,7 @@ module.exports = {
   assertNodePtyJobOwnership,
   assertCygwinBreakawayDenied,
   assertNodePtySourceDeniesMsysBreakaway,
+  assertRebuiltConptyMatchesArch,
   assertRebuiltConptyDeniesMsysBreakaway,
   conptyDeniesCygwinBreakaway,
   nodePtyAddonPath,

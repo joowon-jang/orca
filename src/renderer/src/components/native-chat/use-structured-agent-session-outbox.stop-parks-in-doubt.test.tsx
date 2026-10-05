@@ -4,7 +4,7 @@
 // card. From then on only the user's Retry sends it: the unconfirmed probe resending it onto the
 // now-idle session would start a turn the user just stopped.
 
-import { act, renderHook } from '@testing-library/react'
+import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createStructuredAgentSessionOutboxEntry } from '../../../../shared/structured-agent-session-outbox'
 
@@ -24,6 +24,13 @@ import {
   clearNativeChatDraftCacheForTests,
   readNativeChatDraftCache
 } from './native-chat-draft-cache'
+
+import type { AgentJournalRenderItem } from '../../../../shared/agent-session-journal-types'
+
+const NO_JOURNAL_ITEMS: readonly AgentJournalRenderItem[] = []
+
+// Why: every hook here shares the session outbox store; one left mounted would drain the next test's.
+afterEach(cleanup)
 
 const TARGET = { kind: 'local' } as const
 const REMOTE = { kind: 'environment', environmentId: 'env-1' } as const
@@ -63,6 +70,7 @@ describe('a Stop with a queued send in doubt', () => {
     const view = renderHook(
       (props: { fence: number | null }) =>
         useStructuredAgentSessionOutbox({
+          journalItems: NO_JOURNAL_ITEMS,
           sessionId: 'session-1',
           target: REMOTE,
           fence: props.fence,
@@ -107,6 +115,7 @@ describe('a Stop with a queued send in doubt', () => {
     mocks.call.mockImplementationOnce(() => answer.promise)
     const { result } = renderHook(() =>
       useStructuredAgentSessionOutbox({
+        journalItems: NO_JOURNAL_ITEMS,
         sessionId: 'session-1',
         target: TARGET,
         fence: 1,
@@ -167,6 +176,7 @@ describe('a Stop with a queued send in doubt', () => {
     ])
     const { result } = renderHook(() =>
       useStructuredAgentSessionOutbox({
+        journalItems: NO_JOURNAL_ITEMS,
         sessionId: 'session-1',
         target: TARGET,
         fence: 1,

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type MockResult } from 'vitest'
 
 const execFileMock = vi.hoisted(() => vi.fn())
 vi.mock('node:child_process', () => ({ execFile: execFileMock }))
@@ -45,6 +45,13 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
     resolve = res
   })
   return { promise, resolve }
+}
+
+function returnedTimer(result: MockResult<ReturnType<typeof setTimeout>> | undefined) {
+  if (result?.type !== 'return') {
+    throw new Error('Expected setTimeout to return a timer')
+  }
+  return result.value
 }
 
 function snapshot(
@@ -343,14 +350,14 @@ describe('terminateDescendantSnapshot', () => {
         readTable
       })
 
-      const initialTimer = setTimeoutSpy.mock.results[0]?.value as NodeJS.Timeout
+      const initialTimer = returnedTimer(setTimeoutSpy.mock.results[0])
       expect(initialTimer.hasRef()).toBe(false)
       await vi.advanceTimersByTimeAsync(0)
-      const graceTimer = setTimeoutSpy.mock.results[1]?.value as NodeJS.Timeout
+      const graceTimer = returnedTimer(setTimeoutSpy.mock.results[1])
       expect(graceTimer.hasRef()).toBe(false)
 
       await vi.advanceTimersByTimeAsync(DESCENDANT_KILL_GRACE_MS)
-      const escalationTimer = setTimeoutSpy.mock.results[2]?.value as NodeJS.Timeout
+      const escalationTimer = returnedTimer(setTimeoutSpy.mock.results[2])
       expect(escalationTimer.hasRef()).toBe(false)
     } finally {
       setTimeoutSpy.mockRestore()
@@ -372,14 +379,14 @@ describe('terminateDescendantSnapshot', () => {
         awaitEscalation: true
       })
 
-      const initialTimer = setTimeoutSpy.mock.results[0]?.value as NodeJS.Timeout
+      const initialTimer = returnedTimer(setTimeoutSpy.mock.results[0])
       expect(initialTimer.hasRef()).toBe(true)
       await vi.advanceTimersByTimeAsync(0)
-      const graceTimer = setTimeoutSpy.mock.results[1]?.value as NodeJS.Timeout
+      const graceTimer = returnedTimer(setTimeoutSpy.mock.results[1])
       expect(graceTimer.hasRef()).toBe(true)
 
       await vi.advanceTimersByTimeAsync(DESCENDANT_KILL_GRACE_MS)
-      const escalationTimer = setTimeoutSpy.mock.results[2]?.value as NodeJS.Timeout
+      const escalationTimer = returnedTimer(setTimeoutSpy.mock.results[2])
       expect(escalationTimer.hasRef()).toBe(true)
     } finally {
       setTimeoutSpy.mockRestore()

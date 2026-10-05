@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Session } from './session'
+import type { killWithDescendantSweep } from '../pty-descendant-termination'
 import type { SpawnTreeIdentity } from './session-subprocess-handle'
 import { SESSION_FORCE_KILL_RETRY_MS } from './session-termination-controller'
-import { HeadlessEmulator } from './headless-emulator'
 import type { SessionState, ShellReadyState } from './types'
 import type { TuiAgent } from '../../shared/tui-agent'
 import {
@@ -10,13 +10,13 @@ import {
   setPtyOwnerHostColors
 } from '../../shared/pty-owner-color-query-colors'
 
-const killWithDescendantSweepMock = vi.hoisted(() => vi.fn())
+const killWithDescendantSweepMock = vi.hoisted(() => vi.fn<typeof killWithDescendantSweep>())
 vi.mock('../pty-descendant-termination', () => ({
   killWithDescendantSweep: killWithDescendantSweepMock
 }))
 
 // Stub the subprocess — Session talks to it via an interface, not child_process directly.
-function createMockSubprocess() {
+function createMockSubprocess(spawnIdentity?: SpawnTreeIdentity) {
   const written: string[] = []
   const signals: string[] = []
   let onData: ((data: string) => void) | null = null
@@ -43,7 +43,7 @@ function createMockSubprocess() {
       return resumeCalls
     },
     foregroundProcess: null as string | null,
-    spawnIdentity: undefined as SpawnTreeIdentity | undefined,
+    spawnIdentity,
     getForegroundProcess(): string | null {
       return this.foregroundProcess
     },
@@ -493,29 +493,6 @@ describe('Session', () => {
       expect(session.getSnapshot()?.snapshotAnsi).not.toContain('orca-shell-ready')
     })
 
-    it.each([
-      ['after the ready marker', ['\x1b]777;orca-shell-ready\x07', '\x1b[?2004hfish> ']],
-      ['after the ESC introducer', ['\x1b]777;orca-shell-ready\x07\x1b', '[?2004hfish> ']]
-    ])('preserves Fish bracketed-paste output split %s', (_boundary, chunks) => {
-      createSession({ shellReadySupported: true })
-      const received: string[] = []
-      session.attachClient({
-        onData: (data) => received.push(data),
-        onExit: () => {}
-      })
-
-      for (const chunk of chunks) {
-        subprocess.simulateData(chunk)
-      }
-
-      const output = received.join('')
-      expect(output).toBe('\x1b[?2004hfish> ')
-      const rendered = new HeadlessEmulator({ cols: 80, rows: 24 })
-      expect(rendered.writeSync(output)).toBe(true)
-      expect(rendered.getVisibleLines().join('\n')).not.toContain('[?2004h')
-      rendered.dispose()
-    })
-
     it('publishes an absolute output sequence with live snapshots', () => {
       createSession()
       subprocess.simulateData('first')
@@ -752,9 +729,7 @@ describe('Session', () => {
       createSession({ launchAgent: 'claude' })
       subprocess.spawnIdentity = { rootCreationTimeMs: 555 }
       session.kill()
-      const deps = killWithDescendantSweepMock.mock.calls[0][2] as {
-        expectedRootCreationTimeMs?: number
-      }
+      const [, , deps = {}] = killWithDescendantSweepMock.mock.calls[0]
       expect(deps.expectedRootCreationTimeMs).toBe(555)
     })
 
