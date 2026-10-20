@@ -156,7 +156,11 @@ export async function desktopSidebarOutline(page: Page): Promise<ListOutline> {
         .filter((node) => node.id.startsWith(prefix))
         .map((option) => {
           if (option.getAttribute('role') === 'option') {
-            const key = decodeURIComponent(option.id.slice(prefix.length))
+            // A folder row's id is its host identity; its list key is the virtual row key.
+            const virtualKey = option.dataset.worktreeVirtualRowKey
+            const key = virtualKey?.startsWith('folder-workspace:')
+              ? virtualKey
+              : decodeURIComponent(option.id.slice(prefix.length))
             return `ITEM ${key}${option.getAttribute('aria-current') === 'page' ? ' ACTIVE' : ''}`
           }
           const text = (option.innerText || option.textContent || '').replace(/\s+/g, ' ').trim()

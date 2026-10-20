@@ -8,7 +8,10 @@ import type { ProjectOrderBy } from '../../../../../../shared/ui-chrome-types'
 import type { Repo } from '../../../../../../shared/repo-types'
 import type { WorkspaceStatusDefinition, Worktree } from '../../../../../../shared/worktree/types'
 import type { WorktreeLineage } from '../../../../../../shared/worktree/lineage-types'
-import type { ExecutionHostId } from '../../../../../../shared/execution-host'
+import {
+  getLocalExecutionHostLabel,
+  type ExecutionHostId
+} from '../../../../../../shared/execution-host'
 import { getHostDisplayLabelOverrides } from '../../../../../../shared/host-setting-overrides'
 import { planSidebarRows } from '../../../../../../shared/sidebar-list/sidebar-row-plan'
 import { createSidebarPRGroupReader } from '../grouping/pr-group-key'
@@ -248,6 +251,7 @@ export function useSidebarSectionRows(args: SectionRowsArgs) {
       workspaceHostScope: args.workspaceHostScope,
       visibleWorkspaceHostIds: args.visibleWorkspaceHostIds,
       defaultHostId,
+      localHostLabel: getLocalExecutionHostLabel(),
       collapsedHostKeys: effectiveCollapsedGroups,
       forceCollapseHosts: hostDragActive,
       // Why: projects/workspaces are the primary sidebar object; host sections are only an explicit host-filter view.

@@ -1,10 +1,10 @@
 import {
   ALL_EXECUTION_HOSTS_SCOPE,
   LOCAL_EXECUTION_HOST_ID,
-  getLocalExecutionHostLabel,
   normalizeExecutionHostId,
   type ExecutionHostId
 } from '../../../src/shared/execution-host'
+import { getHostContextLabel } from '../../../src/shared/worktree/host-context-labels'
 import type { DesktopSidebarFacts } from '../../../src/shared/sidebar-list/desktop-sidebar-facts'
 import type { ProjectGroup } from '../../../src/shared/project-group-types'
 import type { Repo } from '../../../src/shared/repo-types'
@@ -37,9 +37,6 @@ export function buildHostFeedView(args: {
       return id ? [[id, label] as const] : []
     })
   )
-  if (hostPlatform && !hostLabelOverrides.has(LOCAL_EXECUTION_HOST_ID)) {
-    hostLabelOverrides.set(LOCAL_EXECUTION_HOST_ID, getLocalExecutionHostLabel(hostPlatform))
-  }
   return {
     groupBy: view.groupBy,
     sortBy: view.sortBy,
@@ -51,7 +48,9 @@ export function buildHostFeedView(args: {
     workspaceStatuses: view.workspaceStatuses,
     pinnedDisplayPolicy: desktop?.showPinnedInGroups ? 'duplicate-in-groups' : 'single-location',
     defaultHostId: normalizeExecutionHostId(desktop?.focusedHostId) ?? LOCAL_EXECUTION_HOST_ID,
-    hostLabelOverrides
+    hostLabelOverrides,
+    // Null platform names no OS ("This computer"); the phone's own never stands in for it.
+    localHostLabel: getHostContextLabel(LOCAL_EXECUTION_HOST_ID, { hostPlatform })
   }
 }
 

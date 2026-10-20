@@ -5,7 +5,7 @@ import {
   OrcaRuntimeWithSidebarTemporal,
   sidebarFactsRuntime
 } from './sidebar-inputs/orca-runtime-sidebar-temporal'
-import { OrcaRuntimeWithMigrationCatalog } from './orca-runtime-migration-catalog'
+import { OrcaRuntimeWithAgentTransitions } from './orca-runtime-agent-transitions'
 import { ORCA_SIDEBAR_INPUTS_IS_MAIN } from '../../shared/sidebar-inputs-switch'
 import { ORCA_LAYOUT_OWNER_IS_MAIN } from '../../shared/layout-owner-switch'
 import type { RuntimeCommandSurfaceHost } from './orca-runtime-core'
@@ -37,6 +37,10 @@ import type { LayoutApplyReply } from '../../shared/workspace-layout/workspace-l
 import { rekeyMovedPaneOwners } from './moved-pane-owner-rekey'
 import { applyWindowLayoutCommand, type WindowLayoutCommand } from './runtime-layout-apply'
 import type { TerminalCreateOptions } from './runtime-terminal-contracts'
+import {
+  installStructuredAgentAvailability,
+  type StructuredAgentAvailabilityReader
+} from './structured-agent-availability'
 import { PairedServerRowsProducer } from './sidebar-inputs/paired-server-rows-producer'
 import { RepoIconDataUrls } from './sidebar-inputs/repo-icon-data-urls'
 import { WorkspaceRowsProducer } from './sidebar-inputs/workspace-rows-producer'
@@ -50,9 +54,9 @@ import { HEADLESS_RUNTIME_WINDOW_ID } from '../../shared/runtime-session-contrac
 import { getHostDisplayLabelOverrides } from '../../shared/host-setting-overrides'
 
 // Switch point: a window-fed build keeps no sidebar facts layer.
-const OrcaRuntimeSidebarBase: typeof OrcaRuntimeWithMigrationCatalog = ORCA_SIDEBAR_INPUTS_IS_MAIN
+const OrcaRuntimeSidebarBase: typeof OrcaRuntimeWithAgentTransitions = ORCA_SIDEBAR_INPUTS_IS_MAIN
   ? OrcaRuntimeWithSidebarTemporal
-  : OrcaRuntimeWithMigrationCatalog
+  : OrcaRuntimeWithAgentTransitions
 
 // oxlint-disable-next-line typescript/no-unsafe-declaration-merging -- SAFETY: The existing Linear installer supplies the canonical prototype surface.
 class OrcaRuntimeService extends OrcaRuntimeSidebarBase {
@@ -168,7 +172,7 @@ class OrcaRuntimeService extends OrcaRuntimeSidebarBase {
     })
   }
 
-  constructor(...args: ConstructorParameters<typeof OrcaRuntimeWithMigrationCatalog>) {
+  constructor(...args: ConstructorParameters<typeof OrcaRuntimeWithAgentTransitions>) {
     super(...args)
     // Why: the runtime listing re-runs a scan the worktree-change generation overtook and re-lists
     // through this runtime's scan cache, so a worktree change must reach both. The desktop IPC
@@ -176,6 +180,14 @@ class OrcaRuntimeService extends OrcaRuntimeSidebarBase {
     registerDetectedWorktreeScanInvalidation()
     registerWorktreeChangeInvalidator((repoId) => this.invalidateWorktreeCatalog(repoId))
     publishWorkspaceViewChanges(this.store, (event) => this.emitClientEvent(event))
+  }
+
+  private structuredAgentAvailability?: ReturnType<typeof installStructuredAgentAvailability>
+
+  /** This host's agent health snapshot and every replacement, from first use; returns the release. */
+  subscribeStructuredAgentAvailability(read: StructuredAgentAvailabilityReader): () => void {
+    this.structuredAgentAvailability ??= installStructuredAgentAvailability(this.store, this)
+    return this.structuredAgentAvailability.subscribe(read)
   }
 
   /** Whether a window owns the layout and can show a launch's tab ahead of its process. */

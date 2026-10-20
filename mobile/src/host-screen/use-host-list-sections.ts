@@ -10,7 +10,7 @@ import { buildFilterRepos, type WorkspaceSectionRepo } from '../worktree/workspa
 import type { Section, SectionRepo, Worktree } from '../worktree/workspace-list-types'
 import { rowFiltersForView } from '../worktree/workspace-view-settings'
 import { buildHostFeedCatalog, buildHostFeedView } from './host-sidebar-feed-inputs'
-import { buildHostFeedSections } from './host-sidebar-feed-sections'
+import { buildHostFeedSections, buildPreFeedSections } from './host-sidebar-feed-sections'
 import { useHostRepoIconDataUrls } from './use-host-repo-icon-data-urls'
 import type { HostSidebarFeed } from './use-host-sidebar-feed'
 import type { HostScreenState } from './use-host-screen-state'
@@ -21,6 +21,8 @@ export type HostListSectionsInputs = {
   feed: HostSidebarFeed | null
   /** The rows worktree.ps and the desktop's server lists served, with display state applied. */
   displayWorktrees: Worktree[]
+  /** The desktop's platform, which names its own host; never the phone's. */
+  hostPlatform: NodeJS.Platform | null
   state: HostScreenState
 }
 
@@ -97,6 +99,7 @@ function useFeedHostListSections({
   client,
   feed,
   displayWorktrees,
+  hostPlatform,
   state
 }: HostListSectionsInputs): HostListSections {
   const collapsedGroups = useCollapsedGroups(state)
@@ -119,14 +122,15 @@ function useFeedHostListSections({
         view: state.view,
         projectOrderBy,
         desktop: domains?.desktop ?? null,
-        hostPlatform: state.hostPlatform
+        hostPlatform
       }),
-    [state.view, projectOrderBy, domains, state.hostPlatform]
+    [state.view, projectOrderBy, domains, hostPlatform]
   )
   const built = useMemo(
     () => (domains ? buildSidebarFeedRows(domains, catalog, view) : null),
     [domains, catalog, view]
   )
+  const loading = feed?.kind === 'loading'
   const sections = useMemo(
     () =>
       built
@@ -137,8 +141,15 @@ function useFeedHostListSections({
             repoHostIdByRepoId: state.repoHostIdByRepoId,
             search: state.search
           })
-        : NO_SECTIONS,
-    [built, displayWorktrees, state.repoHostIdByRepoId, state.search]
+        : loading
+          ? buildPreFeedSections({
+              rows: displayWorktrees,
+              view: state.view,
+              search: state.search,
+              repoHostIdByRepoId: state.repoHostIdByRepoId
+            })
+          : NO_SECTIONS,
+    [built, loading, displayWorktrees, state.view, state.repoHostIdByRepoId, state.search]
   )
 
   const iconIds = useMemo(() => [...new Set(domains?.repoIcons.values() ?? [])], [domains])

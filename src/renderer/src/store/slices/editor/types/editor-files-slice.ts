@@ -21,6 +21,7 @@ import type {
   EditorTabSelection,
   OpenFile
 } from './open-file'
+import type { EditorBufferRecords } from '../buffers/editor-buffer-record'
 import type { EditorOpenLinkIntent, EditorOpenResult } from './editor-open-link-intent'
 import type { OpenFilePathRekey, RekeyOpenFilesResult } from './open-file-path-rekey'
 import type {
@@ -42,6 +43,8 @@ export type OpenFileOptions = {
 export type EditorFilesSlice = {
   // Open files / editor tabs
   openFiles: OpenFile[]
+  /** Buffer state per open tab id; the matching OpenFile fields mirror it. */
+  editorBuffers: EditorBufferRecords
   activeFileId: string | null
   activeFileIdByWorktree: Record<string, string | null> // worktreeId -> last active file
   activeTabTypeByWorktree: Record<string, WorkspaceVisibleTabType> // worktreeId -> last active tab type

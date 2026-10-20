@@ -86,6 +86,9 @@ export type FilterState = WorkspaceRowFilters
 // repoIcon stays unread wire data until drawn (readMobileRepoIcon).
 export type SectionRepo = ProjectSectionRepo & { badgeColor?: string; repoIcon?: unknown }
 
+/** A workspace the host is still creating; the feed names only its project, null under its own header. */
+export type SectionPendingCreation = { key: string; repoName: string | null }
+
 export type Section = {
   key: string
   title: string
@@ -94,5 +97,7 @@ export type Section = {
   repo?: SectionRepo
   /** The header's own count from a feed-built list, which a collapsed section still shows. */
   count?: number
+  /** Drawn under the header, above its rows, as the desktop places them. */
+  pendingCreations?: SectionPendingCreation[]
   data: Worktree[]
 }

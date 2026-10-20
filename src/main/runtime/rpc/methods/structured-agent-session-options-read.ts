@@ -94,20 +94,19 @@ export const STRUCTURED_AGENT_SESSION_OPTIONS_READ_METHODS = [
       const own = record?.provider === params.agent ? record : null
       // A reopened chat's own model stays a row, so a client that replaces an unlisted one keeps
       // it. Not a new chat's read (it names a worktree): that answer seeds the next new chat's list.
-      const answer =
-        own && worktree === undefined && finishedListingIds(listing) && listing.origin !== 'unknown'
-          ? {
-              ...listing,
-              models: structuredAgentSessionOptionModels(
-                listing.models,
-                own.options?.model,
-                (row) => row
-              )
-            }
-          : listing
-      // The chat's running agent can say what no listing does: a Pi that started with no model.
-      const started = own ? host.deps.adapter.startUnavailable?.(own.sessionId) : undefined
-      return started && !answer.unavailable ? { ...answer, unavailable: started } : answer
+      return own &&
+        worktree === undefined &&
+        finishedListingIds(listing) &&
+        listing.origin !== 'unknown'
+        ? {
+            ...listing,
+            models: structuredAgentSessionOptionModels(
+              listing.models,
+              own.options?.model,
+              (row) => row
+            )
+          }
+        : listing
     }
   })
 ]

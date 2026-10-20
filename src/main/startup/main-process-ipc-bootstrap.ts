@@ -7,6 +7,7 @@ import {
   onStructuredAgentSessionsHeldChanged,
   structuredAgentSessionsHeld
 } from '../native-chat/agent-session-wire/structured-agent-session-registry'
+import { subscribeAgentSessionUploadRemoval } from '../native-chat/agent-session-attachments/agent-session-attachment-store-registry'
 
 export function registerMainProcessIpcHandlers(): void {
   ipcMain.handle('app:awaitFirstWindowStartupServices', async () => {
@@ -36,6 +37,13 @@ export function registerMainProcessIpcHandlers(): void {
     const window = state.mainWindow
     if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) {
       window.webContents.send('app:structuredAgentSessionsHeldChanged', held)
+    }
+  })
+  // Why: drafts check their pastes once at restore; a sweep can remove one later in the run.
+  subscribeAgentSessionUploadRemoval((uploadDir) => {
+    const window = state.mainWindow
+    if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.send('app:agentSessionUploadRemoved', uploadDir)
     }
   })
   ipcMain.handle('app:recoverLegacyWorkerTerminalsForRendererStartup', () =>

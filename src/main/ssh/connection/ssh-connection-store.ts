@@ -265,7 +265,7 @@ export function getRuntimeOwnedSshTargetId(runtimeId: string): string {
   return `${RUNTIME_OWNED_SSH_TARGET_ID_PREFIX}${runtimeId}`
 }
 
-/** Ephemeral runtime targets, hidden from SSH-host surfaces. */
+/** Any target Orca created as an implementation detail; hidden from SSH-host surfaces. */
 export function isRuntimeOwnedSshTarget(target: SshTarget): boolean {
   return target.owner !== undefined
 }

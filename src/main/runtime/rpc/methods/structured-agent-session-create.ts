@@ -260,10 +260,19 @@ export async function createStructuredAgentSessionForWorktree(args: {
   activate: boolean
   options?: Readonly<Record<string, string>>
   tabId?: string
+  /** Create without starting the agent; its first message starts it. */
+  atRest?: true
 }): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
+  // An at-rest create's ledger row is keyed by its intent, as a client's create is.
+  const envelope = args.atRest
+    ? {
+        ...args.envelope,
+        payloadFingerprint: structuredAgentSessionCreateIntentFingerprint(args)
+      }
+    : args.envelope
   const prepared: PreparedStructuredAgentSessionCreate | StructuredCreateRefused =
     await resolveUncommittedStructuredCreate(() =>
-      prepareStructuredAgentSessionCreateForWorktree(args)
+      prepareStructuredAgentSessionCreateForWorktree({ ...args, envelope })
     )
   if ('refusal' in prepared) {
     return { ok: false, refusal: prepared.refusal }

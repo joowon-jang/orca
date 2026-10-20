@@ -14,7 +14,7 @@
     "audit:perf": "oxlint --config config/oxlint-performance-audit.json --format json src",
     "test:perf:contracts": "vitest run --config config/vitest.performance.config.ts",
     "format": "oxfmt --write .",
-    "lint": "oxlint && pnpm run audit:anti-slop && pnpm run audit:code-quality:native && pnpm run audit:code-quality:type-aware && pnpm run check:reliability-gates && pnpm run check:dead-classes && pnpm run check:max-lines-ratchet && pnpm run check:ts-nocheck-ratchet && pnpm run check:runtime-electron-ratchet && pnpm run check:focus-read-ratchet && pnpm run check:layout-writer-ratchets && pnpm run check:deprecated-runtime-owner-ratchet && pnpm run check:path-literal-ratchet && pnpm run check:legacy-relay-fence-ratchet && pnpm run check:readme-local-links && pnpm run check:node-runtime-pin && pnpm run verify:rpc-params-catalog && pnpm run verify:acp-protocol && pnpm run verify:bundled-skill-guides && pnpm run verify:skill-bundle-manifest && pnpm run verify:localization-catalogs && pnpm run verify:localization-extraction && pnpm run verify:localization-coverage && pnpm run check:process-host-imports && pnpm run check:main-sync-spawn-ratchet && pnpm run check:compat-boundary-imports",
+    "lint": "oxlint && pnpm run audit:anti-slop && pnpm run audit:code-quality:native && pnpm run audit:code-quality:type-aware && pnpm run check:reliability-gates && pnpm run check:dead-classes && pnpm run check:max-lines-ratchet && pnpm run check:ts-nocheck-ratchet && pnpm run check:runtime-electron-ratchet && pnpm run check:focus-read-ratchet && pnpm run check:layout-writer-ratchets && pnpm run check:path-literal-ratchet && pnpm run check:legacy-relay-fence-ratchet && pnpm run check:unproven-pty-retirement-ratchet && pnpm run check:id-only-store-write-ratchet && pnpm run check:readme-local-links && pnpm run check:node-runtime-pin && pnpm run verify:rpc-params-catalog && pnpm run verify:acp-protocol && pnpm run verify:bundled-skill-guides && pnpm run verify:skill-bundle-manifest && pnpm run verify:localization-catalogs && pnpm run verify:localization-extraction && pnpm run verify:localization-coverage && pnpm run check:process-host-imports && pnpm run check:main-sync-spawn-ratchet && pnpm run check:compat-boundary-imports",
     "audit:code-quality": "pnpm run audit:code-quality:native && pnpm run audit:code-quality:type-aware && pnpm run audit:react-doctor",
     "audit:code-quality:native": "oxlint --config config/oxlint-code-quality-native-plugins.json src config tests mobile --deny-warnings",
     "audit:code-quality:type-aware": "oxlint --type-aware --config config/oxlint-code-quality-type-aware.json src config tests --deny-warnings",
@@ -38,9 +38,10 @@
     "check:reliability-gates": "node config/scripts/check-reliability-gates.mjs",
     "check:max-lines-ratchet": "node config/scripts/check-max-lines-ratchet.mjs",
     "check:ts-nocheck-ratchet": "node config/scripts/check-ts-nocheck-ratchet.mjs",
-    "check:deprecated-runtime-owner-ratchet": "node config/scripts/check-deprecated-runtime-owner-ratchet.mjs",
     "check:path-literal-ratchet": "node config/scripts/check-path-literal-ratchet.mjs",
     "check:legacy-relay-fence-ratchet": "node config/scripts/check-legacy-relay-fence-ratchet.mjs",
+    "check:unproven-pty-retirement-ratchet": "node config/scripts/check-unproven-pty-retirement-ratchet.mjs",
+    "check:id-only-store-write-ratchet": "node config/scripts/check-id-only-store-write-ratchet.mjs",
     "check:worktree-id-composer-ratchet": "node config/scripts/check-worktree-id-composer-ratchet.mjs",
     "check:e2e-typecheck-ratchet": "node config/scripts/check-e2e-typecheck-ratchet.mjs",
     "check:runtime-electron-ratchet": "node config/scripts/check-runtime-electron-ratchet.mjs",
@@ -256,7 +257,7 @@
     "@tiptap/starter-kit": "3.31.3",
     "@types/hast": "^3.0.4",
     "@types/mdast": "^4.0.4",
-    "@types/node": "^25.6.0",
+    "@types/node": "^24.19.2",
     "@types/proper-lockfile": "^4.1.4",
     "@types/qrcode": "^1.5.6",
     "@types/react": "~19.2.18",
@@ -354,10 +355,10 @@
     "{*.{ts,tsx,js,jsx,mjs,mts,cts},!(cloud)/**/*.{ts,tsx,js,jsx,mjs,mts,cts}}": [
       "oxlint",
       "oxlint --config config/oxlint-react-doctor.json",
-      "oxfmt --write"
+      "oxfmt --write --no-error-on-unmatched-pattern"
     ],
-    "{*.{json,css},!(cloud)/**/*.{json,css}}": [
-      "oxfmt --write"
+    "{*.{json,css,md,mdx,yml,yaml},!(cloud)/**/*.{json,css,md,mdx,yml,yaml}}": [
+      "oxfmt --write --no-error-on-unmatched-pattern"
     ]
   },
   "engines": {

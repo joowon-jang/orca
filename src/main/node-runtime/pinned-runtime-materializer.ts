@@ -4,7 +4,11 @@ import { createReadStream } from 'node:fs'
 import { chmod, link, mkdir, rm } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { getMainHttpClient, type MainHttpClient } from '../network/http-client'
-import { downloadVerifiedArchive, extractRuntimeArchive } from './runtime-archive-download'
+import {
+  downloadVerifiedArchive,
+  extractRuntimeArchive,
+  ReleaseMismatchError
+} from './runtime-archive-download'
 import { findOrcadCachePath } from './orcad-cache-path'
 import { orcadNodeRuntimeExecutable } from '../../shared/orcad-artifacts'
 import {
@@ -66,7 +70,9 @@ export async function materializeVerifiedRuntimeArchive(
       downloaded,
       options.fetcher ?? getMainHttpClient().fetch,
       options.signal
-    )
+    ).catch((error: unknown) => {
+      throw unreachableArchiveError(archive, cached.path, error, options.signal)
+    })
     options.signal?.throwIfAborted()
     await publishVerified(
       downloaded,
@@ -78,6 +84,32 @@ export async function materializeVerifiedRuntimeArchive(
   } finally {
     await rm(temporaryDir, { recursive: true, force: true })
   }
+}
+
+/**
+ * Why: the bare network error (e.g. net::ERR_CONNECTION_REFUSED) reads as the host failing, but
+ * only this computer downloads the archive. Its cache path is the offline way in, since a file
+ * placed there with the pinned hash is used without any download.
+ */
+function unreachableArchiveError(
+  archive: PinnedRuntimeArchive,
+  cachePath: string,
+  error: unknown,
+  signal: AbortSignal | undefined
+): unknown {
+  const localFailure = error instanceof Error && 'code' in error && typeof error.code === 'string'
+  if (signal?.aborted || error instanceof ReleaseMismatchError || localFailure) {
+    return error
+  }
+  const cause = error instanceof Error ? error.message : String(error)
+  return new Error(
+    `This computer couldn't download ${archive.label} from ${archive.url} (${cause}). ` +
+      `Orca uploads ${archive.label} to the host from this computer, so the host doesn't need ` +
+      `internet access, but this computer must reach that address once. Check this computer's ` +
+      `network connection or proxy and connect again, or download that file on another machine ` +
+      `and copy it to ${cachePath}`,
+    { cause: error }
+  )
 }
 
 export async function materializeCachedRuntimeExecutable(

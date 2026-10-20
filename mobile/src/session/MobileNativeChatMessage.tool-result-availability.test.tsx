@@ -68,6 +68,10 @@ vi.mock('./MobileNativeChatMessageActionsSheet', () => ({
 }))
 
 import { MobileNativeChatMessage } from './MobileNativeChatMessage'
+import {
+  MobileNativeChatDisclosureContext,
+  useMobileNativeChatDisclosures
+} from './mobile-native-chat-disclosure-store'
 
 function message(blocks: NativeChatMessage['blocks']): NativeChatMessage {
   return { id: 'source', role: 'assistant', blocks, timestamp: 1, source: 'transcript' }
@@ -126,6 +130,64 @@ describe('mobile tool result availability', () => {
     }
     return renderer!
   }
+
+  // The page's window unmounts a row scrolled past; older messages joining its fold change its id.
+  it('keeps what the reader opened in a windowed-out row by its row key, per Tools default', () => {
+    const row = message([
+      { type: 'tool-call', callId: 'one', name: 'Bash', input: 'first input' },
+      { type: 'tool-result', callId: 'one', output: 'first output' },
+      { type: 'tool-call', callId: 'two', name: 'Bash', input: 'second input' },
+      { type: 'tool-result', callId: 'two', output: 'second output' }
+    ])
+    function Window({ shown, id, tools }: { shown: boolean; id: string; tools: boolean }) {
+      const disclosures = useMobileNativeChatDisclosures('chat')
+      return createElement(
+        MobileNativeChatDisclosureContext.Provider,
+        { value: disclosures },
+        shown
+          ? createElement(MobileNativeChatMessage, {
+              message: { ...row, id },
+              rowKey: 'kept',
+              toolsExpanded: tools
+            })
+          : null
+      )
+    }
+    const draw = (shown: boolean, id = 'source', tools = false) =>
+      act(() => {
+        const element = createElement(Window, { shown, id, tools })
+        if (renderer) {
+          renderer.update(element)
+        } else {
+          renderer = create(element)
+        }
+      })
+    const header = () =>
+      renderer!.root.find(
+        (node) =>
+          String(node.type) === 'Pressable' && node.props.accessibilityLiveRegion === 'polite'
+      )
+    draw(true)
+    press(header())
+    press(button(renderer!.root, 'first input'))
+    draw(false)
+    draw(true, 'older-head')
+    expect(toolLines(renderer!.root)).toHaveLength(2)
+    expect(textIn(renderer!.root)).toContain('first output')
+    expect(textIn(renderer!.root)).not.toContain('second output')
+
+    // Tools opens every run and line; the reader closes this run under that default.
+    draw(true, 'older-head', true)
+    expect(textIn(renderer!.root)).toContain('second output')
+    press(header())
+    draw(false, 'older-head', true)
+    draw(true, 'older-head', true)
+    expect(toolLines(renderer!.root)).toHaveLength(0)
+    // Back to the old default: the choices made under it come back.
+    draw(true, 'older-head', false)
+    expect(textIn(renderer!.root)).toContain('first output')
+    expect(textIn(renderer!.root)).not.toContain('second output')
+  })
 
   it('draws each orphan output as its own Result row under one Result header', () => {
     const raw = message(

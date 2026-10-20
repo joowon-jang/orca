@@ -28,6 +28,7 @@ import { InMemoryOrchestrationMessages } from './orca-runtime-test-orchestration
 import type { OrchestrationDb } from './orchestration/db'
 import type { PtyProcessInspection } from '../providers/pty-process-inspection'
 import type { Store } from '../persistence'
+import type { HostWorktreeTarget } from '../../shared/worktree/host-qualified-identity'
 
 type RuntimeService = InstanceType<typeof OrcaRuntimeService>
 type HeadlessTerminal = InstanceType<typeof HeadlessEmulator>
@@ -375,14 +376,14 @@ function createStaleRuntimeWorktreeStore(
   const metaById: Record<string, WorktreeMeta> = {
     [worktreeId]: makeWorktreeMeta(metaOverrides)
   }
-  const removeWorktreeMeta = vi.fn((id: string) => {
+  const removeWorktreeMeta = vi.fn(({ id }: HostWorktreeTarget) => {
     delete metaById[id]
   })
   const runtimeStore = {
     ...store,
     getAllWorktreeMeta: () => metaById,
     getWorktreeMeta: (id: string) => metaById[id],
-    setWorktreeMeta: (id: string, meta: Partial<WorktreeMeta>) => {
+    setWorktreeMeta: ({ id }: HostWorktreeTarget, meta: Partial<WorktreeMeta>) => {
       metaById[id] = { ...(metaById[id] ?? makeWorktreeMeta()), ...meta }
       return metaById[id]
     },
@@ -406,7 +407,7 @@ const store = {
   getRetiredWorktreeNameRegistry: () => ({ exhaustedTiers: 0, names: [] }),
   mergeRetiredWorktreeNames: () => false,
   addRepo: () => {},
-  updateRepo: (id: string, updates: Record<string, unknown>) =>
+  updateRepo: ({ id }: { id: string }, updates: Record<string, unknown>) =>
     ({
       ...store.getRepo(id),
       ...updates
@@ -428,7 +429,7 @@ const store = {
     }
   }),
   getWorktreeMeta: (worktreeId: string) => store.getAllWorktreeMeta()[worktreeId],
-  setWorktreeMeta: (_worktreeId: string, meta: Record<string, unknown>) =>
+  setWorktreeMeta: (_target: HostWorktreeTarget, meta: Record<string, unknown>) =>
     ({
       ...store.getAllWorktreeMeta()[TEST_WORKTREE_ID],
       ...meta

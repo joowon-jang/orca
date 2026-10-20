@@ -7,6 +7,7 @@ import {
 } from '../../../../shared/agent-status-identity'
 import { isDecorativeAgentTitleFrameChange } from '../../../../shared/agent-decorative-title-signature'
 import { parsePaneKey } from '../../../../shared/stable-pane-id'
+import { normalizeProgramStatusFacet } from '../../../../shared/program-status/facet'
 import { resolveAgentStatusTerminalTitle } from '@/lib/agent-status-terminal-title'
 import { track } from '@/lib/telemetry'
 import { resolveAgentPaneAuthorityKey } from '@/store/slices/agent-pane-authority'
@@ -35,7 +36,11 @@ import {
   normalizeAgentStatusEvent,
   normalizeAgentStatusMetadata
 } from './normalize-agent-status-event'
-import { applyProviderSessionOnlyUpdate } from './agent-status-partial-updates'
+import {
+  applyProgramStatusOnlyUpdate,
+  applyProviderSessionOnlyUpdate,
+  foldProgramStatusIntoPendingRows
+} from './agent-status-partial-updates'
 
 export function createAgentStatusEventApplicator(args: {
   pendingAgentStatusEvents: PendingAgentStatusEvent[]
@@ -66,6 +71,7 @@ export function createAgentStatusEventApplicator(args: {
     if (!payload) {
       return 'dropped'
     }
+    const programStatus = normalizeProgramStatusFacet(data.programStatus) ?? null
     // Reuse first-match pane ownership without rescanning every worktree per event.
     const routingIndex = options?.batch?.routingIndex ?? createAgentStatusPaneRoutingIndex(store)
     let {
@@ -105,6 +111,11 @@ export function createAgentStatusEventApplicator(args: {
       }
     }
     if (!exists) {
+      if (data.programStatusOnly === true) {
+        // Why not pend: progress ticks would crowd real rows out of the bounded queue.
+        foldProgramStatusIntoPendingRows(pendingAgentStatusEvents, data.paneKey, programStatus)
+        return 'dropped'
+      }
       if (options?.replay === true) {
         if (data.worktreeId && hasRuntimeBackedWorktreeAttribution(data)) {
           if (options?.retry !== true) {
@@ -120,7 +131,8 @@ export function createAgentStatusEventApplicator(args: {
       }
       return 'pending'
     }
-    if (options?.replay !== true && options?.retry !== true) {
+    // A facet tick does not supersede a pending state row for the pane.
+    if (options?.replay !== true && options?.retry !== true && data.programStatusOnly !== true) {
       for (let index = pendingAgentStatusEvents.length - 1; index >= 0; index -= 1) {
         if (pendingAgentStatusEvents[index].data.paneKey === data.paneKey) {
           pendingAgentStatusEvents.splice(index, 1)
@@ -151,6 +163,10 @@ export function createAgentStatusEventApplicator(args: {
       return 'dropped'
     }
     const existingStatus = store.agentStatusByPaneKey[paneKey]
+    if (data.programStatusOnly === true) {
+      // Why after ownership but before staleness: the republished row keeps its old receivedAt.
+      return applyProgramStatusOnlyUpdate(store, options?.batch, paneKey, programStatus)
+    }
     if (existingStatus && data.receivedAt < existingStatus.updatedAt) {
       return 'dropped'
     }
@@ -181,6 +197,8 @@ export function createAgentStatusEventApplicator(args: {
     const statusPayloadWithObservation = data.observation
       ? { ...statusPayloadWithProvenance, observation: data.observation }
       : statusPayloadWithProvenance
+    // Why null: main stitches the pane's current facet onto every publish, so absence means cleared.
+    const statusPayloadWithProgramStatus = { ...statusPayloadWithObservation, programStatus }
     const identity = resolveAgentStatusIdentity({
       existing:
         existingStatus &&
@@ -214,7 +232,7 @@ export function createAgentStatusEventApplicator(args: {
     const statusWorktreeId = data.worktreeId ?? owningWorktreeId
     const update: AgentStatusUpdate = {
       paneKey,
-      payload: statusPayloadWithObservation,
+      payload: statusPayloadWithProgramStatus,
       terminalTitle,
       timing: {
         updatedAt: data.receivedAt,
@@ -232,7 +250,7 @@ export function createAgentStatusEventApplicator(args: {
       },
       metadata: normalizeAgentStatusMetadata(data, authorityRestartId)
     }
-    // Why: replays are cached state, so they seed completion tracking unless they carry an unseen done.
+    // Why: replays are cached state, so they seed completion tracking unless they carry an unseen completion.
     const replayed =
       options?.replay === true || isSeenHostReplay(data, resolvedPayload.state, existingStatus)
     const applyPostCommitNotification = (): void => {

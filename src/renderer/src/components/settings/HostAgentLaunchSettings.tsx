@@ -8,6 +8,7 @@ import { AgentLaunchSettingsCatalog } from './AgentLaunchSettingsCatalog'
 import {
   mutateHostAgentLaunchSettings,
   readHostAgentLaunchSettings,
+  hostSupportsAutoPermissions,
   type AgentLaunchSettingsOwner
 } from './agent-launch-settings-transport'
 import { Button } from '../ui/button'
@@ -15,7 +16,7 @@ import { translate } from '@/i18n/i18n'
 
 type ReadState =
   | { kind: 'loading' | 'unsupported' | 'failed' }
-  | { kind: 'ready'; settings: AgentLaunchSettings }
+  | { kind: 'ready'; settings: AgentLaunchSettings; autoSupported: boolean }
 
 export function HostAgentLaunchSettings({
   environmentId,
@@ -44,9 +45,12 @@ export function HostAgentLaunchSettings({
     controllerRef.current = controller
     setRead({ kind: 'loading' })
     try {
-      const settings = await readHostAgentLaunchSettings(owner, controller.signal)
+      const [settings, autoSupported] = await Promise.all([
+        readHostAgentLaunchSettings(owner, controller.signal),
+        hostSupportsAutoPermissions(owner)
+      ])
       if (!controller.signal.aborted) {
-        setRead(settings ? { kind: 'ready', settings } : { kind: 'unsupported' })
+        setRead(settings ? { kind: 'ready', settings, autoSupported } : { kind: 'unsupported' })
       }
     } catch {
       if (!controller.signal.aborted) {
@@ -73,7 +77,7 @@ export function HostAgentLaunchSettings({
         try {
           const settings = await mutateHostAgentLaunchSettings(owner, mutation, controller.signal)
           if (!controller.signal.aborted) {
-            setRead({ kind: 'ready', settings })
+            setRead({ kind: 'ready', settings, autoSupported: read.autoSupported })
           }
         } catch {
           if (!controller.signal.aborted) {
@@ -118,6 +122,7 @@ export function HostAgentLaunchSettings({
           detectionTarget={detectionTarget}
           hostName={hostName}
           renderPermissions={renderPermissions}
+          autoSupported={read.autoSupported}
           refreshSettings={() => void refresh()}
         />
       </fieldset>

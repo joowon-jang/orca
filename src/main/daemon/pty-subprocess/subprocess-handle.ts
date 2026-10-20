@@ -30,6 +30,7 @@ export function createDaemonPtySubprocessHandle(args: {
   startupAgentRecognition: RecognizedAgentProcess | null
 }): SubprocessHandle {
   const reportsChildExitStatus = args.reportsChildExitStatus
+  const shellPath = args.shellPath
   const proc = args.process
   // node-pty exposes destroy at runtime but omits it from IPty.
   const nativeProc: DisposableNativePty = proc
@@ -77,7 +78,10 @@ export function createDaemonPtySubprocessHandle(args: {
     pid: proc.pid,
     processNameIsSpawnFile: ptyProcessNameIsSpawnFile(proc),
     ...(process.platform === 'win32'
-      ? { inspectChildProcesses: () => inspectSpawnFileWindowsChildProcesses(proc) }
+      ? {
+          inspectChildProcesses: (fresh?: boolean, ignoreDetached?: boolean) =>
+            inspectSpawnFileWindowsChildProcesses(proc, shellPath, fresh, ignoreDetached)
+        }
       : {}),
     shellPath: args.shellPath,
     shellCwd: args.spawnCwd,

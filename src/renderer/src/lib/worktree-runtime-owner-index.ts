@@ -176,7 +176,7 @@ function addWorktreeOwnerIndexEntry(
   }
 }
 
-function worktreeOwnerHostIds(owner: WorktreeOwnerRecord): ExecutionHostId[] {
+export function worktreeOwnerHostIds(owner: WorktreeOwnerRecord): ExecutionHostId[] {
   const physicalHostId = parseExecutionHostId(owner.hostId)?.id
   const runtimeEnvironmentId = owner.runtimeOwnerEnvironmentId?.trim()
   if (!runtimeEnvironmentId) {

@@ -8,6 +8,10 @@ import {
 } from '../../shared/worktree/sort-order-update'
 import { stripOrcaProvenanceMetaUpdates } from '../worktree-removal-safety'
 import { isRemovedFolderWorkspaceInstance } from '../folder-workspace-meta-presence'
+import {
+  resolveWorktreeMetaOwner,
+  worktreeRowTarget
+} from '../persistence/host-qualified-worktree-meta'
 import type { RuntimeStore } from './runtime-store-contract'
 import {
   isWslMoveSourceHost,
@@ -55,6 +59,10 @@ export async function updateRuntimeManagedWorktreeMetadata(args: {
   ) {
     return worktree
   }
+  const target = worktreeRowTarget(args.store, { id: worktree.id, hostId: executionHostId })
+  if (!target) {
+    throw new Error('selector_ambiguous')
+  }
   if (lineage?.parentWorktree) {
     args.ports.invalidateResolved()
     args.ports.invalidateScan(worktree.repoId)
@@ -77,8 +85,7 @@ export async function updateRuntimeManagedWorktreeMetadata(args: {
     persisted.pushTarget = undefined
   }
   if (lineage?.noParent === true) {
-    args.store.removeWorktreeLineage?.(worktree.id)
-    args.store.removeWorkspaceLineage?.(worktreeWorkspaceKey(worktree.id))
+    args.store.removeWorktreeLineage?.(target)
   } else if (lineage?.parentWorktree) {
     const parent = await args.ports.resolveWorktree(lineage.parentWorktree)
     args.ports.validateParent(worktree, parent)
@@ -96,7 +103,7 @@ export async function updateRuntimeManagedWorktreeMetadata(args: {
       )
     }
     const createdAt = Date.now()
-    args.store.setWorktreeLineage(worktree.id, {
+    const recorded = args.store.setWorktreeLineage(target, {
       worktreeId: worktree.id,
       worktreeInstanceId: worktree.instanceId,
       parentWorktreeId: parent.id,
@@ -105,6 +112,12 @@ export async function updateRuntimeManagedWorktreeMetadata(args: {
       capture: { source: 'manual-action', confidence: 'explicit' },
       createdAt
     })
+    if (!recorded) {
+      throw new RuntimeLineageError(
+        'LINEAGE_PARENT_CONTEXT_CONFLICT',
+        'A same-id workspace on another host owns this lineage.'
+      )
+    }
     args.store.setWorkspaceLineage?.({
       childWorkspaceKey: worktreeWorkspaceKey(worktree.id),
       childInstanceId: worktree.instanceId,
@@ -120,11 +133,7 @@ export async function updateRuntimeManagedWorktreeMetadata(args: {
   if (isRemovedFolderWorkspaceInstance(args.store, worktree.id, executionHostId)) {
     throw new Error('selector_not_found')
   }
-  if (executionHostId && args.store.setWorktreeMetaForHost) {
-    args.store.setWorktreeMetaForHost(worktree.id, executionHostId, metadataUpdates)
-  } else {
-    args.store.setWorktreeMeta(worktree.id, metadataUpdates)
-  }
+  args.store.setWorktreeMeta(target, metadataUpdates)
   // Why: CLI callers need an explicit push for metadata changed outside the renderer's optimistic update path.
   args.ports.invalidateResolved()
   args.ports.notifyChanged(worktree.repoId)
@@ -149,10 +158,16 @@ export function persistRuntimeManagedWorktreeSortOrder(args: {
     args.orderedIds,
     (worktreeId) => args.store.getWorktreeMeta(worktreeId),
     Date.now()
-  ).filter((update) => !isWslMoveWorkspaceBlocked(args.store, update.worktreeId))
-  for (const update of updates) {
-    args.store.setWorktreeMeta(update.worktreeId, { sortOrder: update.sortOrder })
-  }
+  ).filter((update) => {
+    const target = isWslMoveWorkspaceBlocked(args.store, update.worktreeId)
+      ? undefined
+      : resolveWorktreeMetaOwner(args.store, update.worktreeId)
+    // Only what was saved is reported and published.
+    if (target) {
+      args.store.setWorktreeMeta(target, { sortOrder: update.sortOrder })
+    }
+    return target !== undefined
+  })
   if (updates.length === 0) {
     return { updated: 0 }
   }

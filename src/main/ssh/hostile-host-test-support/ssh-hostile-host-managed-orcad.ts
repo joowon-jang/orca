@@ -43,7 +43,12 @@ export async function proveManagedOrcadCell(
     const context = await resolveOrcadRemoteContext(sshTarget, conn)
     expect(context.serverTarget).toBe(expected.runtime)
     const slot = managedOrcadSlot(context, ORCAD_MANAGED_REMOTE_PORT)
-    const deploy = deployOrcad({ ...slot, target: context.serverTarget, census: EMPTY_CENSUS })
+    const deploy = deployOrcad({
+      ...slot,
+      target: context.serverTarget,
+      census: EMPTY_CENSUS,
+      recountCensus: async () => EMPTY_CENSUS
+    })
     if (expected.outcome === 'unavailable') {
       const failure = await deploy.then(
         (deployed) => new Error(`deploy did not fail: ${JSON.stringify(deployed)}`),

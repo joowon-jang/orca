@@ -139,7 +139,7 @@ describe('system SSH forward process', () => {
     const forwardFlagIdx = args.indexOf('-N')
     const localForwardIdx = args.indexOf('-L')
     const exitOnForwardFailureIdx = args.indexOf('ExitOnForwardFailure=no')
-    const standaloneControlIdx = args.indexOf('-S')
+    const controlPathIdx = args.indexOf('-S')
 
     expect(terminatorIdx).toBeGreaterThan(-1)
     expect(forwardFlagIdx).toBeGreaterThan(-1)
@@ -151,7 +151,8 @@ describe('system SSH forward process', () => {
     expect(args[exitOnForwardFailureIdx - 1]).toBe('-o')
     expect(exitOnForwardFailureIdx).toBeLessThan(terminatorIdx)
     expect(args).not.toContain('ExitOnForwardFailure=yes')
-    expect(standaloneControlIdx).toBe(-1)
+    expect(args[controlPathIdx + 1]).toBe('none')
+    expect(controlPathIdx).toBeLessThan(terminatorIdx)
     expectNoOrcaControlMasterArgs(args)
     expect(args).toContain('127.0.0.1:5173:127.0.0.1:3000')
     expect(args[terminatorIdx + 1]).toBe('fdpass-host')
@@ -172,7 +173,7 @@ describe('system SSH forward process', () => {
     expect(built).toContain('LogLevel=INFO')
   })
 
-  it('suppresses Orca mux flags for port forwards without disabling ssh_config muxing', () => {
+  it('runs port forwards unmultiplexed even when ssh_config disables muxing', () => {
     spawnMock.mockReturnValue(createFakeProcess())
 
     spawnSystemSshPortForward(createTarget(), 5173, '127.0.0.1', 3000, {
@@ -189,11 +190,13 @@ describe('system SSH forward process', () => {
     })
 
     const args = spawnMock.mock.calls[0][1] as string[]
-    expect(args.indexOf('-S')).toBe(-1)
+    expect(args[args.indexOf('-S') + 1]).toBe('none')
     expectNoOrcaControlMasterArgs(args)
   })
 
-  it('preserves user-configured muxing for port forwards', () => {
+  // Why: through the user's master, the master owns the listener (it outlives the child's kill)
+  // and logs sshd's refusals on its own stderr, where the managed tunnel never sees them.
+  it("never rides the user's ssh_config ControlMaster", () => {
     spawnMock.mockReturnValue(createFakeProcess())
 
     spawnSystemSshPortForward(
@@ -217,7 +220,9 @@ describe('system SSH forward process', () => {
     )
 
     const args = spawnMock.mock.calls[0][1] as string[]
-    expect(args.indexOf('-S')).toBe(-1)
+    const controlPathIdx = args.indexOf('-S')
+    expect(args[controlPathIdx + 1]).toBe('none')
+    expect(controlPathIdx).toBeLessThan(args.indexOf('--'))
     expectNoOrcaControlMasterArgs(args)
     expect(args).toContain('workbox')
   })

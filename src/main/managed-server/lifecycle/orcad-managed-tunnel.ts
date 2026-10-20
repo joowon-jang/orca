@@ -92,3 +92,8 @@ export function startOrcadManagedTunnel(
 export function closeOrcadManagedTunnel(environmentId: string): Promise<void> {
   return managedTunnels.close(environmentId)
 }
+
+/** Part of the SSH session's teardown, so a Disconnect leaves no managed `ssh -L` listening. */
+export function closeOrcadManagedTunnelsForTarget(targetId: string): Promise<void> {
+  return managedTunnels.closeTarget(targetId)
+}

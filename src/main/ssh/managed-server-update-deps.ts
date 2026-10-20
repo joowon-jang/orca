@@ -13,10 +13,11 @@ export function managedServerUpdateDeps(userDataPath: string): ManagedServerUpda
   return {
     autoUpdate: (environmentId, options) =>
       autoUpdateManagedOrcadEnvironment(userDataPath, { environmentId, appVersion, ...options }),
-    recordedUpdateFailure: (target) =>
-      target.managedServerUpdateFailure?.appVersion === appVersion
-        ? target.managedServerUpdateFailure.reason
-        : null,
+    // Why the stored row: the caller's target is a copy taken before an overlapping check recorded.
+    recordedUpdateFailure: (target) => {
+      const failure = (registry.getTarget(target.id) ?? target).managedServerUpdateFailure
+      return failure?.appVersion === appVersion ? failure.reason : null
+    },
     // Why only a failure counts: a deferral or skip never tried the update.
     failedThisLaunch: (target) => failedThisLaunch.has(target.id),
     recordUpdateFailure: (target, reason) => {

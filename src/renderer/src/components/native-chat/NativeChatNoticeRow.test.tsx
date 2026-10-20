@@ -32,13 +32,23 @@ it('keeps a skipped compaction warning truthful instead of showing the success s
   expect(screen.queryByText('Context compacted')).toBeNull()
 })
 
+type ContinueOffer = Pick<NativeChatOrcaStopView, 'offeredTurnItemId' | 'continueNow'> &
+  Partial<Pick<NativeChatOrcaStopView, 'usageLimitTurnItemId' | 'continueUsageLimit'>>
+
 function orcaStopView(
   hostLabel: string | null,
   continueAvailable: boolean,
   remoteHost: boolean,
-  offer: Pick<NativeChatOrcaStopView, 'offeredTurnItemId' | 'continueNow'>
+  offer: ContinueOffer
 ): NativeChatOrcaStopView {
-  return { hostLabel, remoteHost, continueAvailable, ...offer }
+  return {
+    hostLabel,
+    remoteHost,
+    continueAvailable,
+    usageLimitTurnItemId: null,
+    continueUsageLimit: () => {},
+    ...offer
+  }
 }
 
 const NO_OFFER = { offeredTurnItemId: null, continueNow: () => {} }
@@ -49,7 +59,7 @@ function renderStatus(
   continueAvailable = false,
   remoteHost = false,
   agentName?: string,
-  offer: Pick<NativeChatOrcaStopView, 'offeredTurnItemId' | 'continueNow'> = NO_OFFER
+  offer: ContinueOffer = NO_OFFER
 ) {
   const [message] = projectStructuredItemsToNativeChat([
     {
@@ -209,6 +219,45 @@ describe('the row an Orca stop leaves', () => {
     expect(screen.getByText(LEGACY_TEXT).parentElement?.parentElement).toHaveClass(
       'text-destructive'
     )
+  })
+})
+
+describe('the row a usage limit leaves', () => {
+  const resetsAt = new Date(2026, 9, 18, 15, 0).getTime()
+  const row: AgentJournalStatusItem = {
+    kind: 'status',
+    tone: 'warning',
+    ...agentSessionFailureWords(
+      agentSessionFailureFact('usageLimitReached', {
+        usageLimit: { window: 'session', resetsAt }
+      }),
+      { agentName: 'Claude', surface: 'row' }
+    )
+  }
+
+  it('says when the limit resets in this clock, and continues the turn it ended', () => {
+    vi.useFakeTimers({ now: new Date(2026, 9, 18, 12, 30), toFake: ['Date'] })
+    const continueUsageLimit = vi.fn()
+    renderStatus(row, null, false, false, 'Claude', {
+      ...NO_OFFER,
+      usageLimitTurnItemId: 'cut-turn',
+      continueUsageLimit
+    })
+    vi.useRealTimers()
+    const clock = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(
+      resetsAt
+    )
+    expect(
+      screen.getByText(`Claude hit its session limit. It resets at ${clock}.`)
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(continueUsageLimit).toHaveBeenCalledTimes(1)
+  })
+
+  it('tells a chat that has no Continue to send a message', () => {
+    renderStatus(row, null, false, false, 'Claude')
+    expect(screen.getByText(/Send a message once it resets to continue\.$/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
   })
 })
 
@@ -407,6 +456,21 @@ describe('notice rows', () => {
     const disclosure = screen.getByText('Details').closest('details')
     expect(disclosure?.querySelector('summary')).not.toHaveTextContent('Check the configuration')
     expect(disclosure?.querySelector('pre')).toHaveTextContent('Check the configuration')
+  })
+  it('retains person-facing usage details without inventing a provider frame', () => {
+    renderStatus({
+      kind: 'status',
+      tone: 'warning',
+      ...agentSessionFailureWords(
+        agentSessionFailureFact('usageLimitReached', {
+          detail: { audience: 'person', text: 'Your allowance resets tomorrow.' }
+        }),
+        { surface: 'row' }
+      )
+    })
+    const disclosure = screen.getByText('Details').closest('details')
+    expect(disclosure?.querySelector('pre')).toHaveTextContent('Your allowance resets tomorrow.')
+    expect(screen.queryByText('codex')).not.toBeInTheDocument()
   })
   it('keeps the column layout of command output in monospace', () => {
     const text =

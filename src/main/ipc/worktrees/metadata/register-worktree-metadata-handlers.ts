@@ -10,6 +10,8 @@ import { planWorktreeSortOrderUpdates } from '../../../../shared/worktree/sort-o
 import { readBranchRenameFailureOutputForDisplay } from '../../../agent-hooks/branch-rename-failure-output'
 import { normalizeLinkedWorkItemFields } from '../ipc-context-schemas'
 import { isRemovedFolderWorkspaceInstance } from '../../../folder-workspace-meta-presence'
+import { resolveWorktreeMetaOwner } from '../../../persistence/host-qualified-worktree-meta'
+import { hostWorktreeTarget } from '../../../../shared/worktree/host-qualified-identity'
 import type { WorktreeIpcContext } from '../worktree-ipc-context'
 import {
   isWslMoveSourceHost,
@@ -63,9 +65,13 @@ export function registerWorktreeMetadataHandlers(context: WorktreeIpcContext): v
       if (isRemovedFolderWorkspaceInstance(store, args.worktreeId, executionHostId)) {
         return null
       }
-      const meta = executionHostId
-        ? store.setWorktreeMetaForHost(args.worktreeId, executionHostId, sanitizedUpdates)
-        : store.setWorktreeMeta(args.worktreeId, sanitizedUpdates)
+      const target = executionHostId
+        ? hostWorktreeTarget({ id: args.worktreeId, hostId: executionHostId })
+        : resolveWorktreeMetaOwner(store, args.worktreeId)
+      if (!target) {
+        return null
+      }
+      const meta = store.setWorktreeMeta(target, sanitizedUpdates)
       // Do NOT notify here: renderer already applied this optimistically; a notification would re-sort the sidebar (bug PR #209).
       if (args.updates.displayName !== undefined) {
         // Why: remote clients have no optimistic rename and stopped polling titles, so push a remote-only invalidation; gate on displayName so per-click isUnread updates stay event-free.
@@ -109,7 +115,10 @@ export function registerWorktreeMetadataHandlers(context: WorktreeIpcContext): v
       Date.now()
     ).filter((update) => !isWslMoveWorkspaceBlocked(store, update.worktreeId))
     for (const update of updates) {
-      store.setWorktreeMeta(update.worktreeId, { sortOrder: update.sortOrder })
+      const target = resolveWorktreeMetaOwner(store, update.worktreeId)
+      if (target) {
+        store.setWorktreeMeta(target, { sortOrder: update.sortOrder })
+      }
     }
   })
 

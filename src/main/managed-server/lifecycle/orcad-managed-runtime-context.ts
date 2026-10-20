@@ -129,15 +129,18 @@ export function managedOrcadDeployPolicy(
   force?: boolean
 ): {
   census: OrcadTerminalCensus
+  recountCensus: () => Promise<OrcadTerminalCensus>
   censusRecord: OrcadActivationRecord
   admitRecord: (record: OrcadActivationRecord, candidateVersion: string) => string | null
 } {
+  // Why unknown when a version is active: only the daemon can count its sessions, and
+  // a deploy that guessed zero would restart over live terminals.
+  const census: OrcadTerminalCensus = context.activationRecord.active
+    ? { liveSessions: null, startedSinceActivation: null, daemonProtocolVersion: null }
+    : { liveSessions: 0, startedSinceActivation: 0, daemonProtocolVersion: null }
   return {
-    // Why unknown when a version is active: only the daemon can count its sessions, and
-    // a deploy that guessed zero would restart over live terminals.
-    census: context.activationRecord.active
-      ? { liveSessions: null, startedSinceActivation: null, daemonProtocolVersion: null }
-      : { liveSessions: 0, startedSinceActivation: 0, daemonProtocolVersion: null },
+    census,
+    recountCensus: async () => census,
     censusRecord: context.activationRecord,
     // Why: a host another desktop stopped may hold state its newer build migrated, and this
     // path has no linked record to check first, so only the fenced read can refuse it.

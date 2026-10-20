@@ -103,11 +103,12 @@ export function useGitStatusFileWatchRefresh({
       if (!isWindowVisible()) {
         return
       }
-      if (refreshTimer) {
-        clearTimeout(refreshTimer)
-      }
       // Why: file watchers deliver atomic writes as bursts, but git status is
-      // already coalesced and should only be nudged once per burst.
+      // already coalesced and should only be nudged once per burst. Never push
+      // an armed nudge back: continuous agent writes would starve it.
+      if (refreshTimer) {
+        return
+      }
       refreshTimer = setTimeout(() => {
         refreshTimer = null
         if (!isWindowVisible()) {

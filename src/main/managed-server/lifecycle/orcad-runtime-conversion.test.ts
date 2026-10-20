@@ -245,7 +245,7 @@ describe('the source frozen during a conversion', () => {
   it('still refuses a catalog change mid-conversion', async () => {
     const stage = destination.stage.getMockImplementation()!
     destination.stage.mockImplementationOnce(async (manifest) => {
-      store.updateRepo('repo-1', { displayName: 'Renamed' })
+      store.updateRepo(store.getRepo('repo-1')!, { displayName: 'Renamed' })
       return stage(manifest)
     })
     await expect(convert()).rejects.toThrow('orcad_migration_source_changed')

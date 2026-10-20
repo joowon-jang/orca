@@ -57,7 +57,11 @@ import {
   DEFAULT_SERVER_HOST_KEY_ALGORITHMS,
   orderServerHostKeyAlgorithms
 } from '../ssh-host-key-verifier'
-import { HostKeyVerificationError, isHostKeyVerificationError } from '../ssh-host-key-decision'
+import {
+  HostKeyVerificationError,
+  hostKeyPolicyForOwner,
+  isHostKeyVerificationError
+} from '../ssh-host-key-decision'
 import {
   resolveWithSshG,
   siteConfigMayRestrictHostKeys,
@@ -95,7 +99,6 @@ import type { FileUploadSession } from '../../providers/filesystem-provider-cont
 import { openSshSessionChannelWithRetry, waitForSshChannelOpen } from '../ssh-channel-open'
 import { tagSftpHandshakeCorruption } from '../sftp-handshake-corruption'
 import { withTimeout } from '../../../shared/promise-timeout-fallback'
-import { isEphemeralRuntimeSshOwner } from '../../../shared/managed-orcad-ssh-owner'
 import { isSshUserDisconnected } from '../ssh-user-disconnect'
 
 /** The sign-in a connection holds in memory, handed to the connection that replaces it. */
@@ -319,7 +322,10 @@ export class SshConnection {
       throw new Error('Not connected')
     }
     const client = this.client
-    const remoteCommand = options?.wrapCommand === false ? cmd : wrapRemoteCommandForPosixShell(cmd)
+    const remoteCommand =
+      options?.wrapCommand === false
+        ? cmd
+        : wrapRemoteCommandForPosixShell(cmd, { compress: options?.compressCommand === true })
     return openSshSessionChannelWithRetry(() => {
       this.assertNotDisposed()
       return waitForSshChannelOpen(
@@ -1227,7 +1233,7 @@ export class SshConnection {
         hostKeyStoreFile: boundSshHostKeyStoreFile() ?? undefined,
         strictHostKeyChecking: hostKeyResolved?.strictHostKeyChecking ?? 'ask',
         isHostKeyAlias,
-        isEphemeralRuntimeTarget: isEphemeralRuntimeSshOwner(this.target.owner),
+        policy: hostKeyPolicyForOwner(this.target.owner),
         siteConfigSuppressed,
         // A file that EXISTS and will not open is the absence of evidence, not evidence of a new
         // host — the entry that would have said "this key changed" may be in it. An ABSENT file is

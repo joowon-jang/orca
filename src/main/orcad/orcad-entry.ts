@@ -277,9 +277,7 @@ async function startOrcadRuntime(
     agentHookServer,
     () => runtime
   )
-  if (runtime.sidebarFacts) {
-    registerCleanup(runtime.sidebarFacts.attachSidebarAgentStatusStore(agentHookServer))
-  }
+  registerCleanup(runtime.attachAgentStatusStore(agentHookServer))
 
   // Why the headless entry point rather than registerPtyHandlers directly: this is the
   // same call `--serve` makes, and it threads the store through. Without the store the
@@ -306,6 +304,7 @@ async function startOrcadRuntime(
   await runtime.refreshRestoredOrchestrationAuthority()
   await runtime.reconcileLegacyWorkerTerminals()
   // Hook rows hydrated and the PTY runtime registered: stored sort tiers can be checked.
+  runtime.agentTransitions.seedRestoredRows()
   void runtime.sidebarFacts?.reconcileSortStampTiers(getLocalPtyProvider())
 
   // Runs after RPC stops (cleanups run reversed); later records save synchronously until exit.
@@ -315,6 +314,7 @@ async function startOrcadRuntime(
 
   // Recovery binds terminal and dispatch identities; only now can startup observations be fenced.
   observedStatusCapture.attach(runtime)
+  agentHookServer.setCliWriterExecutionMatcher(observedPaneIdentities, runtime)
   // Why before the RPC server binds: like `--serve`, the first client must find a ready graph.
   const { publishHeadlessRuntimeGraph } = await import('../runtime/headless-runtime-graph')
   publishHeadlessRuntimeGraph(runtime)

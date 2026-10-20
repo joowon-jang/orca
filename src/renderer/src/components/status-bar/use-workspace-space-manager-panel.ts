@@ -12,7 +12,6 @@ import { runWorktreeBatchDelete } from '../sidebar/delete-worktree-flow'
 import { dismissDeleteWorktreeFailureToast } from '../sidebar/delete-worktree-failure-toast'
 import { showWorkspaceListChangedToast } from '../sidebar/stale-workspace-list-toast'
 import { toWorktreeDeleteIdentities } from '../sidebar/worktree-delete-request'
-import { prepareActiveWorktreeFocusAfterDelete } from '../sidebar/active-worktree-focus-after-delete'
 import { translate } from '@/i18n/i18n'
 import type { WorkspaceSpaceSortKey } from './workspace-space-presentation'
 import { useWorkspaceSpaceManagerBindings } from './use-workspace-space-manager-bindings'
@@ -191,7 +190,6 @@ export function useWorkspaceSpaceManagerPanel() {
     (worktree: WorkspaceSpaceWorktree): void => {
       // Why: Space keeps normal deletes non-force so uncommitted work is not
       // discarded silently; a failed row gets this explicit recovery path.
-      const commitFocus = prepareActiveWorktreeFocusAfterDelete(worktree.worktreeId)
       // The failure toast is keyed by the store row's host, which a host-less saved Space row lacks.
       const storeRow = getWorktreeOnHostFromState(
         useAppStore.getState(),
@@ -215,7 +213,6 @@ export function useWorkspaceSpaceManagerPanel() {
             )
             return
           }
-          commitFocus()
           if (storeRow) {
             dismissDeleteWorktreeFailureToast(toWorktreeRemovalTarget(storeRow))
           }

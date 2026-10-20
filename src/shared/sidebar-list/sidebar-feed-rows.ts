@@ -70,6 +70,8 @@ export type SidebarFeedView = {
   /** The host the desktop has focused (its settings' active runtime), where unowned rows land. */
   defaultHostId: ExecutionHostId
   hostLabelOverrides: ReadonlyMap<ExecutionHostId, string>
+  /** The listed host's name for itself when the user has not renamed it. */
+  localHostLabel: string
   /** The desktop window's own saved host order, which it writes; a phone reads the host's. */
   workspaceHostOrder?: readonly ExecutionHostId[]
 }
@@ -276,6 +278,7 @@ export function renderSidebarFeedRows(
     workspaceHostScope: view.workspaceHostScope,
     visibleWorkspaceHostIds: view.visibleWorkspaceHostIds,
     defaultHostId: view.defaultHostId,
+    localHostLabel: view.localHostLabel,
     collapsedHostKeys: collapsed,
     forceCollapseHosts,
     preferProjectGrouping: true

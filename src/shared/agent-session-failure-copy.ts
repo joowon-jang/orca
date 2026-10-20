@@ -46,6 +46,8 @@ export const AGENT_SESSION_FAILURE_COPY = {
   codexSystemNotSignedIn: "Codex isn't signed in. Run `{{loginCommand}}`.",
   codexManagedNotSignedIn:
     "This Codex account isn't signed in. Sign in again in Codex Accounts settings.",
+  antigravityNotSignedIn:
+    "Antigravity isn't signed in. Sign in under Settings → Accounts → Antigravity.",
   agentCommandNotSignedIn:
     'Sign in to {{agent}} with `{{loginCommand}}` on the computer running this chat.',
   interactiveAgentNotSignedIn:
@@ -144,6 +146,14 @@ export const AGENT_SESSION_FAILURE_COPY = {
   providerRetryNumber: 'Retry {{attempt}}.',
   providerRetryNumberOf: 'Retry {{attempt}} of {{maxRetries}}.',
   providerRetryLastError: 'Last error: {{detail}}.',
+  usageLimitReached: '{{agent}} hit its usage limit.',
+  usageLimitReachedNamed: '{{agent}} hit its {{window}} limit.',
+  usageLimitWindowSession: 'session',
+  usageLimitWindowWeekly: 'weekly',
+  usageLimitWindowWeeklyModel: 'weekly model',
+  usageLimitWindowCredits: 'extra usage',
+  usageLimitResetsAt: 'It resets at {{when}}.',
+  usageLimitSendAfterReset: 'Send a message once it resets to continue.',
   previousExitUnverifiable: "Couldn't stop {{agent}} from before.",
   sessionNotRestored:
     "{{agent}} couldn't reopen its earlier session, so this chat continues in a new one. {{agent}} doesn't remember the earlier messages."
@@ -160,6 +170,10 @@ export type AgentSessionFailureCopyValues = {
   loginCommand?: string
   slashCommand?: string
   detail?: string
+  /** A usage limit's name, from the `usageLimitWindow*` pieces. */
+  window?: string
+  /** When a usage limit resets, in the reader's clock. */
+  when?: string
   option?: string
   limit?: string
   size?: string

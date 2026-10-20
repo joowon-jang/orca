@@ -62,9 +62,10 @@ export type OrcadDeployOptions = {
   censusRecord?: OrcadActivationRecord
   /**
    * Counts again under the fence just before the incumbent stops, so a terminal opened during
-   * the upload still defers the update. Called only while the incumbent is the one counted.
+   * the upload still defers the update. Required, since `census` may predate a long upload.
+   * Called only while the incumbent is the one counted; any failure must read as unverifiable.
    */
-  recountCensus?: () => Promise<OrcadTerminalCensus>
+  recountCensus: () => Promise<OrcadTerminalCensus>
   force?: boolean
   /** The Orca app version activating, recorded so an older client never downgrades the host. */
   appVersion?: string

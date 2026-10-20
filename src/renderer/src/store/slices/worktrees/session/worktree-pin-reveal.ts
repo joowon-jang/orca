@@ -10,6 +10,7 @@ import {
 } from '../../../../../../shared/resolved-worktree-lineage'
 import type { WorktreeLineage } from '../../../../../../shared/worktree/lineage-types'
 import type { Worktree } from '../../../../../../shared/worktree/types'
+import { getIndexedWorktreesById } from '../../../worktree-repo-index'
 
 type WorktreeWithEmbeddedLineage = Worktree & { lineage?: WorktreeLineage | null }
 function getProjectedLineage(get: WorktreeSliceGet, worktree: Worktree): WorktreeLineage | null {
@@ -57,7 +58,7 @@ export function createSetWorktreesPinnedAndReveal(
   _set: WorktreeSliceSet,
   get: WorktreeSliceGet
 ): WorktreeSlice['setWorktreesPinnedAndReveal'] {
-  return (worktreeIds, isPinned) => {
+  return (targets, isPinned) => {
     // Only follow a toggled row with the viewport when it's the focused worktree, not an unfocused card.
     const activeSidebarWorktreeId = getActiveSidebarWorkspaceId(
       get().activeWorkspaceKey,
@@ -68,25 +69,27 @@ export function createSetWorktreesPinnedAndReveal(
     const changedWorktreeIds = new Set<string>()
     let didChange = false
     let revealWorktreeId: string | null = null
-    for (const worktreeId of worktreeIds) {
-      const current = get().getKnownWorktreeById(worktreeId)
+    for (const target of targets) {
+      const worktreeId = target.id
+      // Why: an id names every host's copy; without a host only a lone row is safe to write.
+      const current =
+        target.hostId || getIndexedWorktreesById(get().worktreesByRepo, worktreeId).length <= 1
+          ? get().getKnownWorktreeById(worktreeId, target.hostId)
+          : undefined
       if (!current || current.isPinned === isPinned) {
         continue
       }
+      const executionHostId = target.hostId ?? current.hostId ?? 'local'
       didChange = true
       changedWorktreeIds.add(worktreeId)
       const workspaceScope = parseWorkspaceKey(worktreeId)
       if (workspaceScope?.type === 'folder') {
-        void get().updateWorktreeMeta(
-          worktreeId,
-          { isPinned },
-          { executionHostId: current.hostId ?? 'local' }
-        )
+        void get().updateWorktreeMeta(worktreeId, { isPinned }, { executionHostId })
       } else {
         updates.push({
           worktreeId,
           updates: { isPinned },
-          executionHostId: current.hostId ?? 'local'
+          executionHostId
         })
       }
       if (revealWorktreeId === null && worktreeId === activeSidebarWorktreeId) {

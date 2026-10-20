@@ -49,6 +49,7 @@ function pairingRevisionOf(environment: CatalogEnvironment | undefined): number 
 }
 
 export type SameHostPairingRotation = { id: string; fromRevision: number; toRevision: number }
+export type PendingPairingRotation = { id: string; fromRevision: number }
 
 /**
  * `retired`: ids that now name a different machine, whose workspaces and tabs are retired. A managed
@@ -56,14 +57,18 @@ export type SameHostPairingRotation = { id: string; fromRevision: number; toRevi
  * pairing handshake proves, is unchanged under the same SSH target registration. A registration
  * alone is no proof (a reinstall or a target that resolves elsewhere keeps it), so a re-pair whose
  * key is not known yet is decided later, once a catalog carries it, rather than purged on a guess.
- * `sameHost`: re-pairs proven to be the same machine, with the pairing they continue. Re-pairs in
- * neither list are still unresolved.
+ * `sameHost`: re-pairs proven to be the same machine, with the pairing they continue. `pending`:
+ * unresolved re-pairs that can still prove the same machine, with the pairing they would continue.
  */
 export function classifyPeerReplacements(
   previous: readonly CatalogEnvironment[],
   next: readonly CatalogEnvironment[],
   replacedIds: readonly string[]
-): { retired: string[]; sameHost: SameHostPairingRotation[] } {
+): {
+  retired: string[]
+  sameHost: SameHostPairingRotation[]
+  pending: PendingPairingRotation[]
+} {
   const nextById = new Map(next.map((environment) => [environment.id, environment]))
   const retired: string[] = []
   const sameHost: SameHostPairingRotation[] = []
@@ -115,5 +120,11 @@ export function classifyPeerReplacements(
       recordSameHost(id, deferred.revision)
     }
   }
-  return { retired, sameHost }
+  // Why a known prior key only: without one the re-pair can never be proven, so nothing waits on it.
+  const pending = [...deferredHostKeyById].flatMap(([id, deferred]) =>
+    deferred.hostKey !== null && deferred.revision !== null
+      ? [{ id, fromRevision: deferred.revision }]
+      : []
+  )
+  return { retired, sameHost, pending }
 }

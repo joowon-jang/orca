@@ -63,7 +63,9 @@ export function spawnSystemSshCommand(
   }
 
   const remoteCommand =
-    options?.wrapCommand === false ? command : wrapRemoteCommandForPosixShell(command)
+    options?.wrapCommand === false
+      ? command
+      : wrapRemoteCommandForPosixShell(command, { compress: options?.compressCommand === true })
   const proc = spawn(sshPath, [...buildSshArgs(target, options), remoteCommand], {
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true

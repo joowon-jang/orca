@@ -78,7 +78,12 @@ export const REPO_METHODS = [
     params: ProjectGroupMoveProject,
     handler: async (params, context) => ({
       repo: projectRepoVisibilityForClient(
-        await context.runtime.moveProjectToGroup(params.repo, params.groupId ?? null, params.order),
+        await context.runtime.moveProjectToGroup(
+          params.repo,
+          params.groupId ?? null,
+          params.order,
+          params.connectionId
+        ),
         context
       )
     })

@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { MobileNativeChatView, type MobileNativeChatInputLockReason } from './MobileNativeChatView'
 import { foldMobileNativeChatMessages } from './mobile-native-chat-render-data'
+import { useMobileNativeChatFoldReuse } from './mobile-native-chat-fold-reuse'
 import type { MobileNativeChatImageAttachments } from './use-mobile-native-chat-image-attachments'
 import type { MobileNativeChatController } from './use-mobile-native-chat-controller'
 import type { MobileNativeChatStructuredComposer } from './MobileNativeChatComposer'
@@ -69,9 +70,9 @@ export function MobileNativeChatOverlay({
   const session = controller.nativeChatSession
   // The chat is drawn only with a resolved agent; the fallback never reaches the screen.
   const agent = controller.nativeChatAgent ?? ''
-  const folded = useMemo(
-    () => foldMobileNativeChatMessages(session.messages, agent),
-    [session.messages, agent]
+  const folded = useMobileNativeChatFoldReuse(
+    useMemo(() => foldMobileNativeChatMessages(session.messages, agent), [session.messages, agent]),
+    sendSurfaceId
   )
   const streaming = useMobileNativeChatStreamingBubble(
     folded,
@@ -142,7 +143,7 @@ export function MobileNativeChatOverlay({
               composerTray={composerTray}
               onOpenFile={onOpenFile}
               hasMore={session.hasMore}
-              loadingEarlier={session.loadingEarlier}
+              olderPages={session.olderPages}
               onLoadEarlier={session.loadEarlier}
               onSend={images.sendNativeChat}
               sendSurfaceId={sendSurfaceId}

@@ -58,6 +58,7 @@ jobs:
       test_files: ${{ steps.e2e_filter.outputs.test_files }}
       e2e_run_changed: ${{ steps.e2e_filter.outputs.e2e_run_changed }}
       e2e_needs_build: ${{ steps.e2e_filter.outputs.e2e_needs_build }}
+      e2e_ssh_shards: ${{ steps.e2e_filter.outputs.e2e_ssh_shards }}
       native_ime_source_changed: ${{ steps.e2e_filter.outputs.native_ime_source_changed }}
       wsl_source_changed: ${{ steps.e2e_filter.outputs.wsl_source_changed }}
     steps:
@@ -82,6 +83,7 @@ jobs:
             /config/.bun-version
             /config/scripts/check-readme-local-links.mjs
             /config/scripts/pr-code-change-scope.mjs
+            /.oxfmtrc.json
             /config/scripts/pr-package-test-paths.mjs
             /config/scripts/pr-layout-oracle-route.mjs
             /config/scripts/pr-e2e-source-routing.mjs
@@ -272,6 +274,11 @@ jobs:
           if [ "$PREFLIGHT_PHASE_SELECTED" != true ] || [ "$PREFLIGHT_PRIOR_SUCCESS" != true ]; then exit 0; fi
           node node_modules/oxlint/bin/oxlint --format github
 
+      # Why the full tree: it takes ~2s, and the pre-commit hook is skippable.
+      - name: Check formatting
+        if: needs.code_paths.outputs.static_analysis == 'true'
+        run: node node_modules/oxfmt/bin/oxfmt --check .
+
       - name: Reject low-evidence patterns
         if: needs.code_paths.outputs.static_analysis == 'true'
         run: |
@@ -393,10 +400,6 @@ jobs:
         if: needs.code_paths.outputs.static_analysis == 'true'
         run: bun config/scripts/check-layout-writer-ratchets.mjs
 
-      - name: Enforce deprecated runtime-owner importer ratchet
-        if: needs.code_paths.outputs.static_analysis == 'true'
-        run: node config/scripts/check-deprecated-runtime-owner-ratchet.mjs
-
       - name: Enforce path-literal ratchet
         if: needs.code_paths.outputs.static_analysis == 'true'
         run: node config/scripts/check-path-literal-ratchet.mjs
@@ -412,6 +415,14 @@ jobs:
       - name: Enforce legacy relay fence ratchet
         if: needs.code_paths.outputs.static_analysis == 'true'
         run: node config/scripts/check-legacy-relay-fence-ratchet.mjs
+
+      - name: Enforce unproven PTY retirement ratchet
+        if: needs.code_paths.outputs.static_analysis == 'true'
+        run: node config/scripts/check-unproven-pty-retirement-ratchet.mjs
+
+      - name: Enforce id-only store write ratchet
+        if: needs.code_paths.outputs.static_analysis == 'true'
+        run: node config/scripts/check-id-only-store-write-ratchet.mjs
 
       - name: Check Node runtime pin
         if: needs.code_paths.outputs.static_analysis == 'true'
@@ -536,6 +547,7 @@ jobs:
           PREFLIGHT_PHASE_SELECTED: ${{ needs.code_paths.outputs.typecheck == 'true' }}
           PREFLIGHT_PRIOR_SUCCESS: ${{ job.status == 'success' }}
           ORCA_UNIT_SELECTION_MODE: ${{ vars.ORCA_UNIT_SELECTION_MODE || 'shadow' }}
+          ORCA_PULL_REQUEST_DRAFT: ${{ github.event.pull_request.draft }}
           # Five shards use fewer runner minutes; the repository variable can still request ten.
           ORCA_UNIT_FULL_SHARD_COUNT: ${{ vars.ORCA_UNIT_FULL_SHARD_COUNT || '5' }}
         run: |
@@ -1117,11 +1129,20 @@ jobs:
           restore-keys: |
             electron-builder-linux-
 
+      # Restore in the foreground: background steps may only be single run steps (ci-background-steps.test.mjs).
       - uses: ./.github/actions/prepare-linux-package-fixture
-        id: daemon-fixture-cache
-        background: true
+        id: daemon-fixture-cache-restore
         with:
           fixture: daemon-shutdown-descendants
+          load: 'false'
+
+      - name: Load daemon shutdown fixture image
+        id: daemon-fixture-cache
+        background: true
+        env:
+          FIXTURE: daemon-shutdown-descendants
+          CACHE_HIT: ${{ steps.daemon-fixture-cache-restore.outputs.cache-hit }}
+        run: bash .github/actions/prepare-linux-package-fixture/load-fixture.sh
 
       - uses: ./.github/actions/install-node-dependencies
         with:
@@ -1147,6 +1168,8 @@ jobs:
       # probe carries its own in-process deadline. Four at once on a 4-vCPU runner starve each other
       # past those deadlines; serial, every probe owns the runner.
       - name: Test Linux Electron lifecycle boundary
+        env:
+          ORCA_BACKGROUND_LAUNCH: '1'
         run: >-
           xvfb-run --auto-servernum pnpm exec vitest run --config config/vitest.config.ts
           --no-file-parallelism
@@ -1156,28 +1179,55 @@ jobs:
           src/main/browser/browser-route-h3-egress.electron.test.ts
           src/main/browser/browser-route-dns-prefetch.electron.test.ts
           src/main/persistence/profile-state/profile-state-writer-stall.electron.test.ts
+          src/main/browser/popup-origin-chrome.electron.test.ts
+          src/main/browser/browser-link-materialization.electron.test.ts
           src/main/browser/browser-popup-compatibility.electron.test.ts
+          src/main/browser/browser-popup-adapter-compatibility.electron.test.ts
           src/main/browser/browser-popup-native-compatibility.electron.test.ts
           src/main/browser/browser-popup-background-compatibility.electron.test.ts
+
+      - name: Restore native components
+        id: linux-native-restore
+        uses: ./.github/actions/prepare-wayland-clipboard
+        with:
+          build: 'false'
 
       # The isolated glibc-floor build writes only the Wayland helper, so JavaScript can overlap.
       - name: Build native components
         id: linux-native
         background: true
-        uses: ./.github/actions/prepare-wayland-clipboard
+        env:
+          CACHE_HIT: ${{ steps.linux-native-restore.outputs.cache-hit }}
+        run: bash .github/actions/prepare-wayland-clipboard/build-or-validate.sh
 
-      # Restore independent fixtures during builds; keep native lifecycle probes serial.
+      # Load independent fixtures during builds; keep native lifecycle probes serial.
       - uses: ./.github/actions/prepare-linux-package-fixture
-        id: shutdown-fixture-cache
-        background: true
+        id: shutdown-fixture-cache-restore
         with:
           fixture: headless-serve-shutdown
+          load: 'false'
+
+      - name: Load headless serve shutdown fixture image
+        id: shutdown-fixture-cache
+        background: true
+        env:
+          FIXTURE: headless-serve-shutdown
+          CACHE_HIT: ${{ steps.shutdown-fixture-cache-restore.outputs.cache-hit }}
+        run: bash .github/actions/prepare-linux-package-fixture/load-fixture.sh
 
       - uses: ./.github/actions/prepare-linux-package-fixture
-        id: cli-fixture-cache
-        background: true
+        id: cli-fixture-cache-restore
         with:
           fixture: cli-launch-contract
+          load: 'false'
+
+      - name: Load CLI launch contract fixture image
+        id: cli-fixture-cache
+        background: true
+        env:
+          FIXTURE: cli-launch-contract
+          CACHE_HIT: ${{ steps.cli-fixture-cache-restore.outputs.cache-hit }}
+        run: bash .github/actions/prepare-linux-package-fixture/load-fixture.sh
 
       - name: Install Linux package tooling
         id: linux-package-tools
@@ -1509,6 +1559,7 @@ jobs:
       test_files: ${{ needs.code_paths.outputs.test_files }}
       run_changed_e2e: ${{ needs.code_paths.outputs.e2e_run_changed != 'false' }}
       needs_build: ${{ needs.code_paths.outputs.e2e_needs_build != 'false' }}
+      managed_ssh_shards: ${{ needs.code_paths.outputs.e2e_ssh_shards || '["1/2","2/2"]' }}
 
   # Why its own required job, apart from `e2e`: the rest of the suite is red on main, but the
   # layout oracle is green there, and its known-on-main list absorbs today's findings. Only the two

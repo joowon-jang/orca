@@ -11,7 +11,7 @@ import type { Store } from '../../persistence'
 import type {
   OrcadMigrationBlocker,
   OrcadMigrationPreflight
-} from '../../../shared/orcad-migration-preflight'
+} from '../../../shared/orcad-migration/orcad-migration-preflight'
 import {
   createOrcadMigrationManifest,
   type OrcadMigrationExportStore

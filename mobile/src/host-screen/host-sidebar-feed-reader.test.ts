@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SidebarInputsFeed } from '../../../src/main/runtime/sidebar-inputs/sidebar-inputs-feed'
 import { testDomain } from '../../../src/main/runtime/sidebar-inputs/sidebar-inputs-feed.test-fixture'
-import type { SidebarInputsChangedEvent } from '../../../src/shared/sidebar-list/sidebar-inputs-feed-contract'
+import {
+  SIDEBAR_INPUTS_SEMANTICS_VERSION,
+  type SidebarInputsChangedEvent
+} from '../../../src/shared/sidebar-list/sidebar-inputs-feed-contract'
 import type { RpcResponse } from '../transport/types'
 import type { UnvalidatedRpcRequestPort } from '../transport/unvalidated-rpc-request-port'
 import { HostSidebarFeedReader, type HostSidebarFeedRead } from './host-sidebar-feed-reader'
@@ -108,7 +111,7 @@ describe('readHostSidebarFeed', () => {
     generation: 'g',
     revision: 3,
     schemaVersion: 1,
-    semanticsVersion: 1,
+    semanticsVersion: SIDEBAR_INPUTS_SEMANTICS_VERSION,
     domains: new Map()
   }
 
@@ -121,7 +124,16 @@ describe('readHostSidebarFeed', () => {
 
   it('asks to reopen when the host means other things by its inputs', () => {
     expect(
-      readHostSidebarFeed({ installed: { ...installed, semanticsVersion: 2 }, unavailable: false })
+      readHostSidebarFeed({
+        installed: { ...installed, semanticsVersion: SIDEBAR_INPUTS_SEMANTICS_VERSION + 1 },
+        unavailable: false
+      })
+    ).toEqual({ kind: 'reopen' })
+  })
+
+  it('asks a host from before desktop facts carried focus and labels to reopen', () => {
+    expect(
+      readHostSidebarFeed({ installed: { ...installed, semanticsVersion: 1 }, unavailable: false })
     ).toEqual({ kind: 'reopen' })
   })
 })

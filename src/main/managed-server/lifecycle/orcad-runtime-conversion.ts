@@ -9,7 +9,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import type { OrcadManagedConversionResult } from '../../../shared/orcad-managed-runtime'
-import type { OrcadMigrationSourceCutover } from '../../../shared/orcad-migration-source-cutover'
+import type { OrcadMigrationSourceCutover } from '../../../shared/orcad-migration/orcad-migration-source-cutover'
 import { recordManagedOrcadMigration } from '../../../shared/runtime-environment-managed-orcad-store'
 import { listEnvironments } from '../../../shared/runtime-environment-store'
 import {

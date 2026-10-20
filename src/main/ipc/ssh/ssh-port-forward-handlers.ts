@@ -10,6 +10,7 @@ import {
   portForwardManager
 } from './ssh-ipc-context'
 import { persistPortForwards } from './ssh-port-forward-persistence'
+import { PortForwardTornDownError } from '../../ssh/port-forwarding/ssh-port-forward'
 import { broadcastPortForwards, enrichDetected } from './ssh-renderer-broadcast'
 
 export function registerSshPortForwardHandlers(): void {
@@ -73,6 +74,10 @@ export function registerSshPortForwardHandlers(): void {
         broadcastPortForwards(getCurrentMainWindow, entry.connectionId)
         return entry
       } catch (err) {
+        // Why: a Disconnect emptied the runtime list; saving it would erase the target's forwards.
+        if (err instanceof PortForwardTornDownError) {
+          throw err
+        }
         // Why: edit/rollback may have failed, so resync renderer to actual runtime state.
         persistPortForwards(args.targetId)
         broadcastPortForwards(getCurrentMainWindow, args.targetId)

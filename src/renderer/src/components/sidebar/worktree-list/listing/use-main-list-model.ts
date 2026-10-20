@@ -10,7 +10,11 @@ import {
 import { useSidebarListSession } from '@/lib/sidebar-list-session'
 import { getFolderWorkspaceHostId } from '../../../../../../shared/folder-workspace-execution-host'
 import type { FolderWorkspace } from '../../../../../../shared/folder-workspace-types'
-import { parseExecutionHostId, type ExecutionHostId } from '../../../../../../shared/execution-host'
+import {
+  getLocalExecutionHostLabel,
+  parseExecutionHostId,
+  type ExecutionHostId
+} from '../../../../../../shared/execution-host'
 import { getHostDisplayLabelOverrides } from '../../../../../../shared/host-setting-overrides'
 import type { SidebarFeedDomains } from '../../../../../../shared/sidebar-list/sidebar-feed-domains'
 import {
@@ -131,6 +135,7 @@ export function useMainSidebarListModel(args: SidebarListModelArgs): SidebarList
       pinnedDisplayPolicy: args.pinnedDisplayPolicy,
       defaultHostId,
       hostLabelOverrides: getHostDisplayLabelOverrides(settings),
+      localHostLabel: getLocalExecutionHostLabel(),
       workspaceHostOrder
     }),
     [

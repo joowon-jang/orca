@@ -125,7 +125,7 @@ export async function installOrcadBundle(
   }
 }
 
-function executablePermissionsCommand(
+export function executablePermissionsCommand(
   host: RemoteHostPlatform,
   directory: string,
   target: NodeRuntimeTarget

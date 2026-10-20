@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
-import { Pressable, ScrollView, Text, View } from 'react-native'
+import { Pressable, Text, View } from 'react-native'
+import { MobileNativeChatOwnedScrollView } from './MobileNativeChatOwnedScrollView'
 import { ChevronRight } from 'lucide-react-native'
 import { agentJournalToolCallLifecycle } from '../../../src/shared/agent-journal-tool-call-lifecycle'
 import { diffFromText, diffFromToolCall } from '../../../src/shared/native-chat-diff'
@@ -92,7 +93,9 @@ function ToolLineDetail({
   fullCommand,
   commandLanguage,
   results,
-  fontScale
+  fontScale,
+  disclosureKey,
+  memberId
 }: {
   call: NativeChatToolCallBlock | undefined
   body: NativeChatToolResultBlock | undefined
@@ -100,6 +103,8 @@ function ToolLineDetail({
   commandLanguage: string | null
   results: NativeChatWebSearchResult[]
   fontScale: number
+  disclosureKey?: string
+  memberId?: string
 }): React.JSX.Element {
   const diff = call
     ? diffFromToolCall(call.name, call.input)
@@ -120,7 +125,9 @@ function ToolLineDetail({
       {results.length > 0 ? <SearchResults results={results} fontScale={fontScale} /> : null}
       {diff ? <DiffView lines={diff} fontScale={fontScale} /> : null}
       {!diff && fullCommand ? (
-        <ScrollView
+        <MobileNativeChatOwnedScrollView
+          rootIdentity={`${memberId ?? call?.callId ?? 'detail'}:command`}
+          positionKey={`${disclosureKey ?? call?.callId ?? 'detail'}:command`}
           style={[styles.codeBox, styles.codeScroll]}
           nestedScrollEnabled
           keyboardShouldPersistTaps="handled"
@@ -128,10 +135,12 @@ function ToolLineDetail({
           <Text selectable={INLINE_TEXT_SELECTION} style={[styles.codeText, type]}>
             {command ? <MobileSyntaxSegments segments={command} /> : fullCommand}
           </Text>
-        </ScrollView>
+        </MobileNativeChatOwnedScrollView>
       ) : null}
       {body ? (
-        <ScrollView
+        <MobileNativeChatOwnedScrollView
+          rootIdentity={`${memberId ?? body?.callId ?? 'detail'}:output`}
+          positionKey={`${disclosureKey ?? body?.callId ?? 'detail'}:output`}
           style={[styles.codeBox, styles.codeScroll]}
           nestedScrollEnabled
           keyboardShouldPersistTaps="handled"
@@ -142,7 +151,7 @@ function ToolLineDetail({
           >
             {truncateToolDetail(body.output)}
           </Text>
-        </ScrollView>
+        </MobileNativeChatOwnedScrollView>
       ) : null}
     </View>
   )
@@ -151,6 +160,7 @@ function ToolLineDetail({
 /** Desktop parity: `NativeChatToolLine`. A tool sentence with its output behind its
  *  own disclosure; an orphan result draws as a `Result` row. */
 export function MobileNativeChatToolLine({
+  memberId,
   block,
   result,
   defaultExpanded,
@@ -158,6 +168,8 @@ export function MobileNativeChatToolLine({
   fontScale,
   onOpenFile
 }: {
+  /** Tags the line for the page's place-hold. */
+  memberId?: string
   block: NativeChatToolCallBlock | NativeChatToolResultBlock
   /** This call's output, when the run paired one to it. */
   result?: NativeChatToolResultBlock
@@ -198,7 +210,7 @@ export function MobileNativeChatToolLine({
   const duration = call ? formatToolDuration(call.durationMs) : null
 
   return (
-    <View>
+    <View testID={memberId}>
       <Pressable
         style={styles.line}
         onPress={() => hasDetail && setExpanded(!expanded)}
@@ -248,6 +260,8 @@ export function MobileNativeChatToolLine({
       </Pressable>
       {hasDetail && expanded ? (
         <ToolLineDetail
+          memberId={memberId}
+          disclosureKey={disclosureKey}
           call={call}
           body={body}
           fullCommand={fullCommand}

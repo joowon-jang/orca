@@ -404,7 +404,7 @@ module.exports = {
     ensureWaylandClipboard = ensureBundledWaylandClipboard,
     guestHelperDir = join(__dirname, '../resources/guest-tree-kill')
   ) => {
-    assertNotDarkBuild([join(__dirname, '..', 'out', 'main')])
+    assertNotDarkBuild([join(__dirname, '..', 'out', 'main'), mobileWebBundleDir])
     assertPackagedNativeVariantsInstalled(context.electronPlatformName, context.arch)
     assertBundledRipgrepInstalled()
     assertProcessHostOutputBuilt()

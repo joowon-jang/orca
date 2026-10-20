@@ -139,7 +139,6 @@ export function setupWorktreeHandlers(): WorktreeRuntimeStub {
     store.getAllWorktreeMeta,
     store.captureNativeLocalWorktreeMetadataScanExpectation,
     store.setWorktreeMeta,
-    store.setWorktreeMetaForHost,
     store.getProjectHostSetups,
     store.removeWorktreeMeta,
     store.pruneSessionlessMissingLocalWorktreeMetadataForRepo,
@@ -207,9 +206,6 @@ export function setupWorktreeHandlers(): WorktreeRuntimeStub {
   store.getRetiredWorktreeNameRegistry.mockReturnValue({ exhaustedTiers: 0, names: [] })
   resetRetirementCollisionKeyCacheForTests()
   store.setWorktreeMeta.mockReturnValue({})
-  store.setWorktreeMetaForHost.mockImplementation((...args: unknown[]) =>
-    store.setWorktreeMeta(args[0] as string, args[2] as object)
-  )
   store.getProjectHostSetups.mockReturnValue([
     {
       id: 'repo-1',

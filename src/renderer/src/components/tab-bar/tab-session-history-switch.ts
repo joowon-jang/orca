@@ -1,5 +1,4 @@
-// Resolves a tab to its Agent Session History row, so the tab menu offers the same "Resume in New
-// Native Chat" / "Resume in New CLI" move the row menu does, under the row menu's gating.
+// Resolves a tab to its Agent Session History row so both menus offer the same surface switches.
 
 import type { AppState } from '@/store/types'
 import { getIndexedAllWorktrees } from '@/store/worktree-repo-index'

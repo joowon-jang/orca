@@ -39,7 +39,9 @@ import { assertPosixOrcadHost } from './orcad-remote-host-support'
 import { withRuntimeStoreLock, type HeldRuntimeStoreLock } from './remote-node-runtime-store-lock'
 import {
   assertRemoteNodeRuntimePromoted,
+  assertRemoteNodeRuntimeStoreExecutable,
   REMOTE_NODE_RUNTIME_EXIT_PREFIX,
+  REMOTE_NODE_RUNTIME_NOEXEC,
   REMOTE_NODE_RUNTIME_MISSING,
   REMOTE_NODE_RUNTIME_READY,
   REMOTE_NODE_RUNTIME_SELFTEST_FAILED,
@@ -102,6 +104,23 @@ export function nodeRuntimeStageDir(
     host,
     remoteDirname(runtimeDir, host),
     `${RUNTIME_STORE_STAGE_PREFIX}${basename(runtimeDir)}-${token}`
+  )
+}
+
+/**
+ * Creates the stage and runs a two-line script from it, so a store that can't run programs (a
+ * `noexec` home) is named before the ~40 MiB upload instead of failing the self-test after it.
+ */
+export function createExecProbedStageCommand(host: RemoteHostPlatform, stageDir: string): string {
+  const stage = quotePosixShell(stageDir)
+  const probe = quotePosixShell(joinRemotePath(host, stageDir, '.exec-probe'))
+  return (
+    // Why the probe write may fail quietly: a full disk is diagnosed by the upload that follows.
+    `mkdir -p ${stage} && { if printf '#!/bin/sh\\necho ok\\n' > ${probe} 2>/dev/null && chmod 700 ${probe}; then ` +
+    `orca_x=$(${probe} 2>&1); orca_x_status=$?; rm -f ${probe}; ` +
+    `[ "$orca_x_status" = 0 ] || { echo ${REMOTE_NODE_RUNTIME_NOEXEC}; ` +
+    `echo "${REMOTE_NODE_RUNTIME_EXIT_PREFIX}$orca_x_status"; printf '%s\\n' "$orca_x" | head -c 2000; }; ` +
+    `else rm -f ${probe}; fi; }`
   )
 }
 
@@ -290,6 +309,13 @@ export async function ensureRemoteOrcadNodeRuntime(options: {
   let stageUnconfirmed = false
   let hostRemovedStage = false
   try {
+    // Why before the archive: fetching it may download, and a noexec store would waste both.
+    if (!windows) {
+      assertRemoteNodeRuntimeStoreExecutable(
+        await exec(createExecProbedStageCommand(host, stageDir), { signal }),
+        remoteDirname(runtimeDir, host)
+      )
+    }
     const archivePath = await options.archivePath()
     const uploadDir = await mkdtemp(join(dirname(archivePath), '.runtime-upload-'))
     localStage = uploadDir
@@ -297,9 +323,6 @@ export async function ensureRemoteOrcadNodeRuntime(options: {
     await link(archivePath, join(uploadDir, archive)).catch(() =>
       copyFile(archivePath, join(uploadDir, archive))
     )
-    if (!windows) {
-      await exec(`mkdir -p ${quotePosixShell(stageDir)}`, { signal })
-    }
     await remoteStep(() => uploadRelayDirectory(conn, uploadDir, stageDir, host, { signal }))
     let promoteRan = false
     // Why unwrapped on Windows: these are already self-contained powershell.exe command lines.

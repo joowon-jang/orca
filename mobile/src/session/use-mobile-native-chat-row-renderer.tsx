@@ -10,6 +10,8 @@ import type { useMobileNativeChatTurnDisclosure } from './use-mobile-native-chat
 
 /** Desktop parity: `NativeChatTranscriptRow`'s context. */
 export function useMobileNativeChatRowRenderer({
+  rowKeyOf,
+  runOwners,
   toolsExpanded,
   taskListPredecessors,
   fontScale,
@@ -21,6 +23,9 @@ export function useMobileNativeChatRowRenderer({
   receipts,
   actionablePromptIds
 }: {
+  /** The row's place on the page, kept while older messages join it. */
+  rowKeyOf: (message: NativeChatMessage) => string
+  runOwners: ReadonlyMap<string, string>
   toolsExpanded: boolean
   /** The last plan each task-list tool wrote before each row, by row id. */
   taskListPredecessors: ReadonlyMap<string, NativeChatTaskListPredecessors>
@@ -41,6 +46,7 @@ export function useMobileNativeChatRowRenderer({
     ({ item, index }) => (
       <MobileNativeChatMessage
         message={item}
+        rowKey={rowKeyOf(item)}
         toolsExpanded={toolsExpanded}
         // The calls, not the record: a rebuilt record would defeat the row's memo.
         previousTodoWrite={taskListPredecessors.get(item.id)?.todowrite}
@@ -53,9 +59,12 @@ export function useMobileNativeChatRowRenderer({
         receipt={receipts?.get(item.id)}
         awaiting={isActionableStructuredAgentSessionPrompt(item.id, actionablePromptIds)}
         {...turns.resolveRow(index, item)}
+        runOwner={runOwners.get(item.id)}
       />
     ),
     [
+      rowKeyOf,
+      runOwners,
       toolsExpanded,
       taskListPredecessors,
       fontScale,

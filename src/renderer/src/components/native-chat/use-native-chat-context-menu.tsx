@@ -289,7 +289,7 @@ export function useNativeChatContextMenu({
                   <SquareTerminal />
                   {translate(
                     'components.tab.bar.SortableTabContextMenu.switchToTerminalView',
-                    'Switch to terminal view'
+                    'Switch to Terminal'
                   )}
                   <DropdownMenuShortcut>{shortcutLabel}</DropdownMenuShortcut>
                 </DropdownMenuItem>

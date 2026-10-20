@@ -23,6 +23,7 @@ vi.mock('./runtime/runtime-linear-command-dependencies', async (importOriginal) 
 
 import { materializeWorktreePushTargetRemote } from './ipc/worktree-remote'
 import { RuntimeLinearTeamWriteCommands } from './runtime/runtime-linear-team-write-commands'
+import { hostWorktreeTarget } from '../shared/worktree/host-qualified-identity'
 
 const MOVING_WT = 'repo-1::/ws/repo-1/wt'
 const STAYING_WT = 'repo-2::/ws/repo-2/wt'
@@ -55,7 +56,11 @@ describe('push-target bookkeeping under a WSL move', () => {
   async function push(worktreeId: string, hostId?: ExecutionHostId) {
     const setWorktreeMeta = vi.fn()
     const meta = hostId ? { [worktreeId]: mergeWorktreeMetaForWrite(undefined, { hostId }) } : {}
-    const store = { getAllWorktreeMeta: () => meta, setWorktreeMeta }
+    // An unstamped row resolves its host from its repo's only registration.
+    const repos = [
+      { id: 'repo-2', path: '/ws/repo-2', displayName: 'r', badgeColor: '#000', addedAt: 0 }
+    ]
+    const store = { getAllWorktreeMeta: () => meta, getRepos: () => repos, setWorktreeMeta }
     const result = await materializeWorktreePushTargetRemote(
       '/ws/repo',
       target,
@@ -78,9 +83,10 @@ describe('push-target bookkeeping under a WSL move', () => {
     ['the same repo id on another host', MOVING_WT, 'ssh:target-1']
   ])('records the push target for %s', async (_label, worktreeId, hostId) => {
     const { setWorktreeMeta } = await push(worktreeId, hostId)
-    expect(setWorktreeMeta).toHaveBeenCalledWith(worktreeId, {
-      pushTarget: { ...target, remoteCreated: true }
-    })
+    expect(setWorktreeMeta).toHaveBeenCalledWith(
+      hostWorktreeTarget({ id: worktreeId, hostId: hostId ?? 'local' }),
+      { pushTarget: { ...target, remoteCreated: true } }
+    )
   })
 })
 
@@ -140,7 +146,7 @@ describe('Linear workspace backfill under a WSL move', () => {
     ['the same repo id on another host', MOVING_WT, 'ssh:target-1']
   ])('persists the backfill for %s', async (_label, id, hostId) => {
     const { setWorktreeMeta } = await resolveCurrent(worktree(id, hostId))
-    expect(setWorktreeMeta).toHaveBeenCalledWith(id, {
+    expect(setWorktreeMeta).toHaveBeenCalledWith(expect.objectContaining({ id, hostId }), {
       linkedLinearIssueWorkspaceId: 'ws-1',
       linkedLinearIssueOrganizationUrlKey: 'acme'
     })

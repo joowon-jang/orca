@@ -64,7 +64,8 @@ const cases = {
       'src/main/wsl/wsl-orcad-deploy.test.ts',
       'src/main/wsl/nested/wsl-orcad-deploy.test.ts',
       'src/main/ssh/orcad-activation-outcome-log.test.ts',
-      'src/main/managed-server/install/orcad-remote-shell-commands.integration.test.ts'
+      'src/main/managed-server/install/orcad-remote-shell-commands.integration.test.ts',
+      'src/packages/process-host/src/run-process.test.ts'
     ],
     retained: [
       'src/main/wsl/wsl-orcad-real-distro-lane.test.ts',
@@ -76,6 +77,7 @@ const cases = {
       'src/main/ssh/orcad-launch-test-harness.ts',
       'src/main/ssh/orcad-launch.test-fixture.ts',
       'src/main/managed-server/install/remote-install-transport.ts',
+      'src/packages/process-host/src/run-process.ts',
       '.github/workflows/wsl-orcad-e2e.yml'
     ],
     product: 'src/main/wsl/wsl-orcad-deploy.ts'
@@ -148,7 +150,7 @@ it.each([
 
 it('re-includes the real WSL distro root after excluding unit tests', () => {
   const paths = workflows.wsl.on.pull_request.paths
-  const exclude = paths.indexOf('!src/main/wsl/**/*.test.ts')
+  const exclude = paths.indexOf('!**/*.test.ts')
   expect(exclude).toBeGreaterThan(paths.indexOf('src/main/wsl/**'))
   expect(paths.indexOf('src/main/wsl/wsl-orcad-real-distro-lane.test.ts')).toBeGreaterThan(exclude)
   const steps = workflows.wsl.jobs.wsl2.steps

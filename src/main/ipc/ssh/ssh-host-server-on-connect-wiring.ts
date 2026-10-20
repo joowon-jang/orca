@@ -9,6 +9,7 @@ import { findOrcadMigrationSourceCutoverForTarget } from '../../ssh/orcad-migrat
 import { abandonOrcadConversion } from '../../ssh/orcad-conversion-abandon'
 import { retainOrcadMigrationSource } from '../../ssh/orcad-migration-source-retention'
 import { hasOrcadTemplate } from '../../orcad/orcad-artifact-materializer'
+import { isOrcadHostUnavailableFixableOnHost } from '../../orcad/orcad-host-unavailable'
 import { managedServerUpdateDeps } from '../../ssh/managed-server-update-deps'
 import { ensureOrcadManagedTunnel } from '../../managed-server/lifecycle/orcad-managed-tunnel'
 import { verifyOrcadManagedServing } from '../../managed-server/lifecycle/orcad-managed-serving-verify'
@@ -66,7 +67,9 @@ export function hostServerOnConnectDeps(userDataPath: string): HostServerOnConne
         ? target.managedServerUnavailable.reason
         : null,
     recordUnavailable: (target, reason) => {
-      registry.updateTarget(target.id, { managedServerUnavailable: { reason, appVersion } })
+      if (!isOrcadHostUnavailableFixableOnHost(reason)) {
+        registry.updateTarget(target.id, { managedServerUnavailable: { reason, appVersion } })
+      }
     },
     ...managedServerUpdateDeps(userDataPath),
     isEmptyHost: (target) => {

@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { ExecutionHostOwnerMatch } from '../../../shared/worktree-execution-host-resolution'
 import type { HostAuthority } from '../../../shared/host-authority'
-import {
-  getRuntimeEnvironmentIdForWorktree,
-  resolveOwnerWithLegacyFallback
-} from './worktree-runtime-owner'
+import { resolveOwnerWithLegacyFallback } from './worktree-runtime-owner'
 import { OWNER_RESOLUTION_CASES } from './runtime-owner-alias-matrix.test-fixture'
 import { LEGACY_FALLBACK_OWNER_ACCEPTANCE } from './resolve-owner-acceptance.test-fixture'
+import { LEGACY_RUNTIME_OWNER_GOLDEN } from './legacy-runtime-owner-answers.test-fixture'
 import type { WorktreeRuntimeOwnerState } from './worktree-runtime-owner-state'
 
 function describeMatch(match: ExecutionHostOwnerMatch<HostAuthority>): string {
@@ -50,10 +48,9 @@ describe('resolveOwnerWithLegacyFallback acceptance (round-3 design §5)', () =>
         owner.kind === 'resolved' && owner.owner.endpoint.kind === 'environment'
           ? owner.owner.endpoint.environmentId
           : null
-      return (
-        owner.kind !== 'resolved' ||
-        environmentId !== getRuntimeEnvironmentIdForWorktree(c.state, c.worktreeId)
-      )
+      const legacy = LEGACY_RUNTIME_OWNER_GOLDEN[c.name]
+      // Why: the deprecated environment-id reader collapsed `ambiguous` to `null`.
+      return owner.kind !== 'resolved' || environmentId !== (legacy === 'ambiguous' ? null : legacy)
     })
     for (const c of changed) {
       expect(DELIBERATE_CHANGES[c.worktreeId], c.name).toBeDefined()
@@ -117,6 +114,5 @@ describe('resolveOwnerWithLegacyFallback probes', () => {
       }
     }
     expect(ownerOf(withDetected, 'repo-twin-only::wt')).toBe('self@local')
-    expect(getRuntimeEnvironmentIdForWorktree(withDetected, 'repo-twin-only::wt')).toBeNull()
   })
 })

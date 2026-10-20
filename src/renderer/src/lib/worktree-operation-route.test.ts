@@ -686,7 +686,8 @@ describe('resolveWorktreeOperationRouteResult', () => {
       })
     })
 
-    it('drops the HUB transport when two HUBs project the active SSH worktree', () => {
+    // A transport-less route would go over this app's own SSH connection (review-5 #2).
+    it('refuses when two HUBs project the active SSH worktree', () => {
       expect(
         resolveWorktreeOperationRouteResult(
           {
@@ -701,10 +702,7 @@ describe('resolveWorktreeOperationRouteResult', () => {
           },
           WORKTREE_ID
         )
-      ).toEqual({
-        kind: 'resolved',
-        route: { executionHostId: 'ssh:same-private-target', runtimeEnvironmentId: null }
-      })
+      ).toEqual({ kind: 'ambiguous' })
     })
 
     it('keeps an unknown active worktree on its selected host', () => {

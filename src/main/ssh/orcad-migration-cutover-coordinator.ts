@@ -9,19 +9,21 @@
  */
 import type {
   OrcadMigrationCatalogAbortResult,
+  OrcadMigrationCatalogReferenceAbortResult,
   OrcadMigrationCatalogState,
   OrcadMigrationManifest
-} from '../../shared/orcad-migration-manifest'
+} from '../../shared/orcad-migration/orcad-migration-manifest'
 import type {
   OrcadMigrationSnapshotChunkRequest,
   OrcadMigrationSnapshotChunkResult
-} from '../../shared/orcad-migration-scrollback'
+} from '../../shared/orcad-migration/orcad-migration-scrollback'
 import type {
   OrcadMigrationSourceCutover,
   OrcadMigrationSourceCutoverPhase
-} from '../../shared/orcad-migration-source-cutover'
+} from '../../shared/orcad-migration/orcad-migration-source-cutover'
 import { resolveDurableOrcadCatalogMutation } from './orcad-catalog-durable-mutation'
 import { ORCAD_MIGRATION_DESTINATION_UNSUPPORTED } from './orcad-migration-catalog-client'
+import { orcadMigrationRequestFits } from './orcad-migration-manifest-export'
 import {
   listOrcadMigrationSourceCutovers,
   writeOrcadMigrationSourceCutover
@@ -41,6 +43,10 @@ export type OrcadMigrationDestinationCatalog = {
   stage: (manifest: OrcadMigrationManifest) => Promise<OrcadMigrationCatalogState>
   commit: (manifest: OrcadMigrationManifest) => Promise<OrcadMigrationCatalogState>
   abort: (manifest: OrcadMigrationManifest) => Promise<OrcadMigrationCatalogAbortResult>
+  /** Sends only the manifest's identity; for a journal whose manifest no request can carry. */
+  abortByReference: (
+    manifest: OrcadMigrationManifest
+  ) => Promise<OrcadMigrationCatalogReferenceAbortResult>
   stageChunk: (
     request: OrcadMigrationSnapshotChunkRequest
   ) => Promise<OrcadMigrationSnapshotChunkResult>
@@ -134,6 +140,15 @@ export async function abortOrcadMigrationCutover(
     return committedRefusal()
   }
   const { destination } = context
+  // A journal from before #30836 may hold a manifest no request can carry; only abort could not.
+  if (!orcadMigrationRequestFits({ manifest: cutover.manifest })) {
+    const aborted = await destination.abortByReference(cutover.manifest)
+    if (aborted.state === 'committed') {
+      return committedRefusal()
+    }
+    await release(cutover)
+    return { outcome: 'released', evidence: 'catalog-absent' }
+  }
   let state: OrcadMigrationCatalogState
   try {
     state = await destination.readState(cutover.manifest)

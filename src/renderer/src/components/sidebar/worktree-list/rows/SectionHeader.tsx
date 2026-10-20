@@ -94,7 +94,8 @@ export function renderWorktreeSectionHeaderRow(args: {
   const { headerDrag } = ctx
   const isRepoHeader = ctx.groupBy === 'repo' && row.repo !== undefined
   const isProjectGroupHeader = ctx.groupBy === 'repo' && row.projectGroup !== undefined
-  const projectIdForHeader = isRepoHeader ? row.repo!.id : undefined
+  const headerRepo = isRepoHeader ? row.repo : undefined
+  const projectIdForHeader = headerRepo?.id
   const projectGroupIdForHeader =
     isProjectGroupHeader && !row.repo && typeof row.projectGroup?.id === 'string'
       ? row.projectGroup.id
@@ -278,8 +279,8 @@ export function renderWorktreeSectionHeaderRow(args: {
             : undefined
         }
         onPointerDown={
-          isDraggableRepoHeader && projectIdForHeader
-            ? (event) => headerDrag.repoDrag.onHandlePointerDown(event, projectIdForHeader)
+          isDraggableRepoHeader && headerRepo
+            ? (event) => headerDrag.repoDrag.onHandlePointerDown(event, headerRepo)
             : isDraggableProjectGroupHeader && projectGroupIdForHeader
               ? (event) =>
                   headerDrag.projectGroupDrag.onHandlePointerDown(event, projectGroupIdForHeader)

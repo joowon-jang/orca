@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { connect, createServer } from 'node:net'
-import { buildSshArgs, type SystemSshBuildArgsOptions } from './system-ssh-args'
+import { buildForwardProcessSshArgs, type SystemSshBuildArgsOptions } from './system-ssh-args'
 import { findSystemSsh } from './system-ssh-binary'
 import { stopOrphanedOrcaSshForward } from './system-ssh-orphaned-forward'
 import type { SshTarget } from '../../../shared/ssh-types'
@@ -50,7 +50,7 @@ export function buildSystemSshPortForwardArgs(
   remotePort: number,
   options?: SystemSshBuildArgsOptions
 ): string[] {
-  const args = buildSshArgs(target, { ...options, suppressOrcaControlMaster: true })
+  const args = buildForwardProcessSshArgs(target, options)
   const destinationIndex = args.lastIndexOf('--')
   // Why `no`: this second login re-reads the host's ssh_config, so a LocalForward/RemoteForward
   // there collides with the one Orca's main connection already holds, and `yes` exits on it.

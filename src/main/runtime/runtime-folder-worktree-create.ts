@@ -20,6 +20,7 @@ import type {
   WorktreeStartupDraftPaste,
   WorktreeStartupFollowup
 } from './runtime-worktree-agent-startup'
+import { hostWorktreeTargetForRepo } from '../persistence/host-qualified-worktree-meta'
 
 type RuntimeFolderWorktreeCreateDeps = {
   store: RuntimeStore
@@ -74,7 +75,7 @@ export async function createRuntimeFolderWorktree(args: {
     request.nameWasGenerated === true
   )
   const resolvedFolderDisplayName = displayNameRequest.value
-  const meta = deps.store.setWorktreeMeta(worktreeId, {
+  const meta = deps.store.setWorktreeMeta(hostWorktreeTargetForRepo(worktreeId, repo), {
     instanceId,
     ...getProjectHostSetupWorktreeMeta(deps.store.getProjectHostSetups?.() ?? [], repo),
     displayName: resolvedFolderDisplayName ?? request.name,

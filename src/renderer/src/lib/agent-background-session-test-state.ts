@@ -198,7 +198,8 @@ export function stubAgentBackgroundSessionWindow(mocks: {
       runtime: { call: vi.fn() },
       runtimeEnvironments: {
         call: mocks.runtimeEnvironmentCall,
-        subscribe: mocks.runtimeEnvironmentSubscribe
+        subscribe: mocks.runtimeEnvironmentSubscribe,
+        cancelSubscription: vi.fn(async () => undefined)
       }
     }
   })

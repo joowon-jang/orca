@@ -6,6 +6,7 @@ const { gitExecFileAsyncMock } = vi.hoisted(() => ({ gitExecFileAsyncMock: vi.fn
 vi.mock('../git/runner', () => ({ gitExecFileAsync: gitExecFileAsyncMock }))
 
 import { materializeWorktreePushTargetRemote } from './worktree-remote'
+import { hostWorktreeTarget } from '../../shared/worktree/host-qualified-identity'
 
 const REPO_PATH = '/repo-root'
 const FORK_URL = 'git@github.com:contributor/orca.git'
@@ -342,10 +343,14 @@ describe('materializeWorktreePushTargetRemote', () => {
     })
     const target = forkTarget()
     const setWorktreeMeta = vi.fn()
+    // The write lands on the id's only repo row.
     const store: WorktreePushTargetStore = {
       getAllWorktreeMeta: () => ({}),
+      getRepos: () => [
+        { id: 'worktree-1', path: REPO_PATH, displayName: 'r', badgeColor: '#000', addedAt: 1 }
+      ],
       setWorktreeMeta
-    } as unknown as WorktreePushTargetStore
+    }
 
     const result = await materializeWorktreePushTargetRemote(
       REPO_PATH,
@@ -357,9 +362,12 @@ describe('materializeWorktreePushTargetRemote', () => {
     )
 
     expect(result).toEqual({ ...target, remoteCreated: true })
-    expect(setWorktreeMeta).toHaveBeenCalledWith('worktree-1', {
-      pushTarget: { ...target, remoteCreated: true }
-    })
+    expect(setWorktreeMeta).toHaveBeenCalledWith(
+      hostWorktreeTarget({ id: 'worktree-1', hostId: 'local' }),
+      {
+        pushTarget: { ...target, remoteCreated: true }
+      }
+    )
   })
 
   it('does not touch the store when no worktreeId is provided', async () => {

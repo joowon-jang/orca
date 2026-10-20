@@ -2,7 +2,10 @@ import type {
   AgentLaunchSettings,
   AgentLaunchSettingsMutation
 } from '../../../../shared/agent-launch-settings'
-import { AGENT_LAUNCH_SETTINGS_CAPABILITY } from '../../../../shared/agent-launch-runtime-capability'
+import {
+  AGENT_LAUNCH_AUTO_PERMISSIONS_CAPABILITY,
+  AGENT_LAUNCH_SETTINGS_CAPABILITY
+} from '../../../../shared/agent-launch-runtime-capability'
 import { callRuntimeRpc, runtimeEnvironmentSupportsCapability } from '@/runtime/runtime-rpc-client'
 
 export type AgentLaunchSettingsOwner = {
@@ -44,6 +47,16 @@ export async function mutateHostAgentLaunchSettings(
   ) {
     throw new Error('agent_launch_settings_unsupported')
   }
+  if (
+    mutation.type === 'permissions' &&
+    (mutation.mode === 'auto' || mutation.agent !== undefined || mutation.exceptAuto) &&
+    !(await runtimeEnvironmentSupportsCapability(
+      owner.environmentId,
+      AGENT_LAUNCH_AUTO_PERMISSIONS_CAPABILITY
+    ))
+  ) {
+    throw new Error('agent_launch_auto_permissions_unsupported')
+  }
   const result = await callRuntimeRpc<{ settings: AgentLaunchSettings }>(
     { kind: 'environment', environmentId: owner.environmentId },
     'settings.mutateAgentLaunch',
@@ -51,4 +64,11 @@ export async function mutateHostAgentLaunchSettings(
     { expectedEnvironmentPairingRevision: owner.pairingRevision, signal, timeoutMs: 15_000 }
   )
   return result.settings
+}
+
+export function hostSupportsAutoPermissions(owner: AgentLaunchSettingsOwner): Promise<boolean> {
+  return runtimeEnvironmentSupportsCapability(
+    owner.environmentId,
+    AGENT_LAUNCH_AUTO_PERMISSIONS_CAPABILITY
+  )
 }

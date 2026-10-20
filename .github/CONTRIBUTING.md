@@ -37,12 +37,12 @@ In PowerShell, use `$env:ORCA_DEV_MAIN_SOURCEMAPS='0'` before `pnpm dev`.
 Remove the variable when debugging the main process with source maps. Renderer and
 preload settings are unaffected; production builds always keep their hidden main maps.
 
-On macOS and Linux, installs use pnpm's global virtual store: each package version is one slot
+Local installs use pnpm's global virtual store: each package version is one slot
 under `~/pnpm/store` that every worktree links to, instead of a full `node_modules` per worktree.
 An existing worktree converts on its next `pnpm install`, and an older branch without the setting
-converts back the same way. CI always uses the normal layout. Windows does too unless you set
-`ORCA_PNPM_GLOBAL_VIRTUAL_STORE=1`, because its store links are real symlinks, which may need
-administrator rights or Developer Mode. Things to know:
+converts back the same way. CI always uses the normal layout. On Windows, pnpm links with
+junctions when you lack the symlink privilege, so no administrator rights or Developer Mode are
+needed. Things to know:
 
 - Keep `~/node_modules` (and any other `node_modules` above the store) out of your home
   directory. Node resolves upward from the store slot, so a stray one there supplies
@@ -51,7 +51,7 @@ administrator rights or Developer Mode. Things to know:
 - Native addons are never rebuilt in place in a shared slot: each CPU gets its own build
   beside it (see [`native-build-entry.cjs`](../config/scripts/native-build-entry.cjs)), so
   cross-arch packaging is safe for other worktrees.
-- `ORCA_PNPM_GLOBAL_VIRTUAL_STORE=1` opts in on Windows and `=0` opts out anywhere. Keep it set
+- `ORCA_PNPM_GLOBAL_VIRTUAL_STORE=0` opts out. Keep it set
   in your shell: `pnpm run` re-checks the install and relinks a worktree whose layout no longer
   matches.
 

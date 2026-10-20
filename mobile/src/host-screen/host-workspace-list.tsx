@@ -27,6 +27,7 @@ import { repoColor } from '../worktree/repo-color'
 import { getWorktreeCardDetails } from '../../../src/shared/worktree/card-properties'
 import { hostScreenStyles as styles } from './host-screen-styles'
 import { buildRepoLookById } from './host-repo-looks'
+import { HostPendingCreationRow } from './host-pending-creation-row'
 import type { HostScreenController } from './use-host-screen-controller'
 
 export function HostWorkspaceList({ controller }: { controller: HostScreenController }) {
@@ -169,8 +170,11 @@ export function HostWorkspaceList({ controller }: { controller: HostScreenContro
               !embedded && { maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center' }
           ]}
           renderSectionHeader={({ section }) => {
+            const pendingCreations = section.pendingCreations?.map((creation) => (
+              <HostPendingCreationRow key={creation.key} creation={creation} />
+            ))
             if (!section.title) {
-              return null
+              return pendingCreations ? <>{pendingCreations}</> : null
             }
             const isCollapsed = controller.collapsedGroups.has(section.key)
             const count =
@@ -183,37 +187,40 @@ export function HostWorkspaceList({ controller }: { controller: HostScreenContro
             const repoSectionColor = repoSectionLook?.color ?? null
             const repoSectionIcon = repoSectionLook?.icon ?? null
             return (
-              <Pressable
-                style={styles.sectionHeader}
-                onPress={() => settings.toggleCollapsed(section.key)}
-              >
-                {isCollapsed ? (
-                  <ChevronRight size={12} color={colors.textMuted} style={styles.sectionIcon} />
-                ) : (
-                  <ChevronDown size={12} color={colors.textMuted} style={styles.sectionIcon} />
-                )}
-                {section.icon === 'pin' && (
-                  <Pin size={12} color={colors.textMuted} style={styles.sectionIcon} />
-                )}
-                {state.view.groupBy === 'repo' ? (
-                  <View style={styles.sectionRepoIcon}>
-                    <MobileRepoIcon
-                      repoIcon={repoSectionIcon}
-                      size={14}
-                      color={repoSectionColor ?? colors.textSecondary}
+              <>
+                <Pressable
+                  style={styles.sectionHeader}
+                  onPress={() => settings.toggleCollapsed(section.key)}
+                >
+                  {isCollapsed ? (
+                    <ChevronRight size={12} color={colors.textMuted} style={styles.sectionIcon} />
+                  ) : (
+                    <ChevronDown size={12} color={colors.textMuted} style={styles.sectionIcon} />
+                  )}
+                  {section.icon === 'pin' && (
+                    <Pin size={12} color={colors.textMuted} style={styles.sectionIcon} />
+                  )}
+                  {state.view.groupBy === 'repo' ? (
+                    <View style={styles.sectionRepoIcon}>
+                      <MobileRepoIcon
+                        repoIcon={repoSectionIcon}
+                        size={14}
+                        color={repoSectionColor ?? colors.textSecondary}
+                      />
+                    </View>
+                  ) : null}
+                  <Text style={styles.sectionTitle}>{section.title}</Text>
+                  <Text style={styles.sectionCount}>{count}</Text>
+                  {pendingCollapseKeys.has(section.key) && (
+                    <ActivityIndicator
+                      size="small"
+                      color={colors.textMuted}
+                      style={styles.sectionIcon}
                     />
-                  </View>
-                ) : null}
-                <Text style={styles.sectionTitle}>{section.title}</Text>
-                <Text style={styles.sectionCount}>{count}</Text>
-                {pendingCollapseKeys.has(section.key) && (
-                  <ActivityIndicator
-                    size="small"
-                    color={colors.textMuted}
-                    style={styles.sectionIcon}
-                  />
-                )}
-              </Pressable>
+                  )}
+                </Pressable>
+                {pendingCreations}
+              </>
             )
           }}
           ItemSeparatorComponent={ListSeparator}

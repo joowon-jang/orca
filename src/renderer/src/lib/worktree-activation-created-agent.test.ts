@@ -115,9 +115,8 @@ describe('activateAndRevealWorktree', () => {
     const target = { ...makeWorktree(), id: 'wt-handoff', displayName: 'handoff' }
     seedEmptyActivatableWorktree(target, { extraWorktrees: [sibling] })
 
-    // The shape post-delete focus handoff produces. That caller passes no opts at all —
-    // asserted directly in active-worktree-focus-after-delete.test.ts.
-    activateAndExpectNoRelaunch(target.id)
+    // The shape the removal successor produces: no startup payload.
+    activateAndExpectNoRelaunch(target.id, { revealInSidebar: false })
   })
 
   it('does not relaunch when activation opts carry no startup payload', () => {

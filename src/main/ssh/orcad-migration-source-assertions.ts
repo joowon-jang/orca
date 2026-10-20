@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto'
 import {
   serializeOrcadMigrationValue,
   type OrcadMigrationManifest
-} from '../../shared/orcad-migration-manifest'
-import type { OrcadMigrationSourceCutover } from '../../shared/orcad-migration-source-cutover'
+} from '../../shared/orcad-migration/orcad-migration-manifest'
+import type { OrcadMigrationSourceCutover } from '../../shared/orcad-migration/orcad-migration-source-cutover'
 import { createOrcadMigrationManifest } from './orcad-migration-manifest-export'
 import { resolveOrcadMigrationFence } from './orcad-migration-source-fence'
 import { confirmOrcadMigrationTerminalsUnderFence } from './orcad-migration-terminal-gate'

@@ -1,9 +1,7 @@
 // A chat's options, live or at rest.
 //
-// At rest nothing here needs a child. The pick is the record's own `options` — what the next start replays —
-// and the list is the host's model catalog, the same one the picker already reads before a chat
-// exists. A pick made at rest is written to the record as intent, through the same transition a live
-// pick takes, so the next start applies it.
+// The record keeps the next message's choices; the catalog names known defaults. A provider's
+// reports remain execution facts and never replace the saved selection.
 
 import {
   refuse,
@@ -269,28 +267,38 @@ export async function readStructuredAgentSessionOptions(
   const permissionMode = record
     ? await structuredAgentSessionLaunchPermission(context.deps, record)
     : null
-  // The saved pick shows, except one the running child could not take (a model its provider says
+  const selected = live ? await atRest() : options
+  // The saved pick shows, except a model the running child could not take (its provider says it
   // does not exist): that shows what the child runs instead.
-  const refused = live ? (adapter.readOptionRestoreFailures?.(sessionId) ?? []) : []
-  const saved = record?.options
-  const shownSaved = (key: 'model' | 'effort'): boolean =>
-    saved?.[key] !== undefined && !refused.includes(key)
-  const selected = live && (shownSaved('model') || shownSaved('effort')) ? await atRest() : options
+  const refusedModel = live && !!adapter.readOptionRestoreFailures?.(sessionId).includes('model')
+  const saved = record?.options ?? {}
+  const { model: _refused, ...selectedWithoutModel } = selected.current
+  const model = refusedModel
+    ? options.current.model
+    : (saved.model ?? (options.current.model || selected.current.model))
   const current = {
+    ...(refusedModel ? selectedWithoutModel : selected.current),
     ...options.current,
-    ...(shownSaved('model') ? { model: selected.current.model } : {}),
-    ...(shownSaved('effort') ? { effort: selected.current.effort } : {})
+    ...(model !== undefined ? { model } : {}),
+    effort: saved.effort ?? options.current.effort,
+    fastMode:
+      saved.fastMode !== undefined
+        ? selected.current.fastMode
+        : (options.current.fastMode ?? selected.current.fastMode),
+    serviceTier: saved.serviceTier ?? options.current.serviceTier ?? selected.current.serviceTier
   }
-  const confirmed = current.confirmed?.filter((key) =>
-    key === 'model'
-      ? current.model === options.current.model
-      : key !== 'effort' || current.effort === options.current.effort
+  const confirmed = options.current.confirmed?.filter((key) =>
+    key === 'model' || key === 'effort' || key === 'fastMode' || key === 'serviceTier'
+      ? current[key] === options.current[key]
+      : false
   )
   return {
     ...options,
     current: {
       ...current,
-      ...(confirmed ? { confirmed } : {}),
+      confirmed,
+      ...(options.current.fastModeState ? { fastModeState: options.current.fastModeState } : {}),
+      ...(confirmed?.length ? { confirmed } : {}),
       ...(permissionMode ? { permissionMode } : {})
     },
     rewind:

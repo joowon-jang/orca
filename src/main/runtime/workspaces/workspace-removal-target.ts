@@ -9,10 +9,13 @@ import { resolveRuntimeWorktreeRemovalTarget } from '../runtime-worktree-removal
 import type { RuntimeStore } from '../runtime-store-contract'
 import { splitWorktreeId, worktreeIdsEqual } from '../../../shared/worktree/id'
 import { hasWorktreeRemovalRepoOwnerOnOtherHost } from '../../worktree-removal-repo-owner'
-import { advertisedUrlWatcher } from '../../ports/advertised-url-watcher'
-import { deleteWorktreeHistoryDir } from '../../terminal-history-deletion'
+import {
+  dropRemovedWorktreeProcessState,
+  pruneRemovedWorktreeSnapshots
+} from '../../worktree-removal-process-cleanup'
 import { forgetFailedAgentLaunches } from '../../agent-launch/agent-launch-pane-attachment'
 import { closeClientHostedBrowserPagesForWorktree } from '../worktree-browser-client-page-close'
+import { teardownStops } from '../owned-session-teardown-policy'
 import type {
   ForceDeleteWorktreeBranchResult,
   RemoveWorktreeResult
@@ -41,6 +44,7 @@ import {
   resolveAgentTerminalCreateOptions,
   withHostAccountLaunchEnv
 } from '../runtime-agent-terminal-startup'
+import { removeWorktreeMetaRow } from '../../persistence/host-qualified-worktree-meta'
 
 export abstract class OrcaRuntimeWithResolveWorktreeRemovalTarget extends OrcaRuntimeWithRemoveManagedWorktree {
   protected abstract resolveExplicitWorktreeIdScoped(
@@ -157,11 +161,7 @@ export abstract class OrcaRuntimeWithResolveWorktreeRemovalTarget extends OrcaRu
     )
     const acceptedRendererSnapshot = this.acceptedRendererMobileSnapshotByWorktree.get(worktreeId)
     const storedSnapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
-    if (hostId) {
-      store.removeWorktreeMeta(worktreeId, hostId)
-    } else {
-      store.removeWorktreeMeta(worktreeId)
-    }
+    removeWorktreeMetaRow(store, worktreeId, hostId)
     // Why outside the same-id gate: retirement is per host and per pane, so a surviving owner keeps its own.
     this.dropAgentStatusForRemovedWorktreeFn?.(worktreeId, hostId ?? persistedHostId)
     if (!preservesSameIdOwner) {
@@ -187,24 +187,32 @@ export abstract class OrcaRuntimeWithResolveWorktreeRemovalTarget extends OrcaRu
       this.acceptedRendererMobileSnapshotByWorktree.delete(worktreeId)
       this.cancelScheduledMobileSessionTabsChanged(worktreeId)
       this.notifyMobileSessionTabsRemoved(worktreeId)
-      advertisedUrlWatcher.forgetWorktree(worktreeId)
-      forgetFailedAgentLaunches(worktreeId, null)
-      deleteWorktreeHistoryDir(worktreeId)
-      this.closeHeadlessBrowserPagesForWorktree(worktreeId)
-      closeClientHostedBrowserPagesForWorktree(this, worktreeId)
+      dropRemovedWorktreeProcessState(worktreeId)
+      this.releaseRemovedWorktreeHostSessions(worktreeId, 'worktree-removal')
+    }
+    const snapshotDirectory = store.getProfileStorageDirectory?.()
+    if (snapshotDirectory) {
+      pruneRemovedWorktreeSnapshots(snapshotDirectory, worktreeId, hostId)
     }
   }
 
-  // Why: headless offscreen browser pages are main-process BrowserWindows that
-  // outlive a worktree unless explicitly closed — removing a worktree without
-  // closing its open panes leaks the windows for the life of the serve process.
-  protected closeHeadlessBrowserPagesForWorktree(worktreeId: string): void {
-    if (!this.offscreenBrowserBackend || !this.agentBrowserBridge?.tabList) {
+  // Every removal path calls this (desktop IPC, runtime, project); PTYs and chats stop before.
+  // Headless pages are main-process windows that otherwise outlive the worktree.
+  releaseRemovedWorktreeHostSessions(
+    worktreeId: string,
+    entryPoint: 'worktree-removal' | 'folder-removal' | 'project-removal'
+  ): void {
+    if (teardownStops(entryPoint, 'launch')) {
+      forgetFailedAgentLaunches(worktreeId, null)
+    }
+    if (!teardownStops(entryPoint, 'host-browser')) {
       return
     }
-    for (const tab of this.agentBrowserBridge.tabList(worktreeId).tabs) {
-      void this.offscreenBrowserBackend.closeTab(tab.browserPageId).catch(() => {})
+    const backend = this.offscreenBrowserBackend
+    for (const tab of backend ? (this.agentBrowserBridge?.tabList?.(worktreeId).tabs ?? []) : []) {
+      void backend?.closeTab(tab.browserPageId).catch(() => {})
     }
+    closeClientHostedBrowserPagesForWorktree(this, worktreeId)
   }
 
   async forceDeletePreservedBranch(

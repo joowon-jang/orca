@@ -186,7 +186,7 @@ export async function observeBackgroundPopupProbe(
       expect(status().native.creation.at(-1)).toMatchObject({
         firstNavigationPolicy: 'disable_non_proxied_udp',
         firstNavigationOwner: expect.any(Number),
-        firstNavigationTitle: targetOrigin
+        firstNavigationTitle: 'about:blank'
       })
       expect(await child.evaluate('window.open("about:blank")===null')).toBe(true)
     }

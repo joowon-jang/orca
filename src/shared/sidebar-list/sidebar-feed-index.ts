@@ -55,7 +55,8 @@ export function buildFeedHostOptions(
       id: parsed.environmentId,
       name: host.label
     })),
-    hostLabelOverrides: view.hostLabelOverrides
+    hostLabelOverrides: view.hostLabelOverrides,
+    localHostLabel: view.localHostLabel
   }).map((host) => {
     const label = serverLabelByHostId.get(host.id)
     return label ? { ...host, label } : host

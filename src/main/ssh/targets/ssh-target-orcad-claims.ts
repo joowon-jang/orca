@@ -12,7 +12,7 @@ import {
 import type {
   OrcadMigrationBlocker,
   OrcadMigrationPreflight
-} from '../../../shared/orcad-migration-preflight'
+} from '../../../shared/orcad-migration/orcad-migration-preflight'
 import type { SshTarget } from '../../../shared/ssh-types'
 import {
   collectDependentStateBlockers,

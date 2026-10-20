@@ -10,7 +10,7 @@
 import {
   ORCAD_MIGRATION_SOURCE_CUTOVER_VERSION,
   type OrcadMigrationSourceCutover
-} from '../../shared/orcad-migration-source-cutover'
+} from '../../shared/orcad-migration/orcad-migration-source-cutover'
 import type { OrcadDeltaMoveResult } from '../../shared/orcad-managed-runtime'
 import { recordManagedOrcadMigration } from '../../shared/runtime-environment-managed-orcad-store'
 import type { KnownRuntimeEnvironment } from '../../shared/runtime-environments'
@@ -35,6 +35,7 @@ import {
   unfinishedOrcadDelta,
   type OrcadDeltaMovePlan
 } from './orcad-migration-delta-plan'
+import { assertOrcadMigrationRequestFits } from './orcad-migration-manifest-export'
 import { retainOrcadMigrationSource } from './orcad-migration-source-retention'
 import {
   assessOrcadMigrationTerminals,
@@ -76,6 +77,10 @@ export async function runOrcadDeltaMove(args: OrcadDeltaMoveArgs): Promise<Orcad
       ...refuse('orcad_migration_preflight_blocked', orcadMigrationRefusalReason(plan.blockers)),
       blockers: plan.blockers
     }
+  }
+  if (!plan.resumes) {
+    // Before the journal: a delta no request can carry would pin the host's fence for good.
+    assertOrcadMigrationRequestFits({ manifest: plan.manifest })
   }
   const terminals = await assessOrcadMigrationTerminals(store, target.id, args.censusHost)
   if (terminals.verdict !== 'exited' && terminals.verdict !== 'bridged') {
@@ -150,7 +155,7 @@ async function commitDelta(
   const context: OrcadMigrationCutoverContext = {
     userDataPath,
     store: plan.source,
-    freshSource: () => orcadDeltaSourceStore(store, target, plan.moved),
+    freshSource: () => orcadDeltaSourceStore(store, target, plan.moved, cutover.manifest),
     claims: args.claims,
     destination: args.destination,
     now

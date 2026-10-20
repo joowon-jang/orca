@@ -1,5 +1,6 @@
 import type { ExecutionHostId } from '../../../../../../shared/execution-host'
-import { runtimeTargetForWorkspaceOwner } from '@/lib/resolve-owner'
+import { resolveOwner, runtimeTargetForWorkspaceOwner } from '@/lib/resolve-owner'
+import { hostRouteForAuthority, type HostRoute } from '@/runtime/runtime-client-target'
 import type { RuntimeClientTarget } from '../../../../../../shared/runtime-client-target'
 import type { AppState } from '../../../types'
 import { WORKTREE_REMOVAL_AMBIGUOUS_ERROR } from './worktree-slice-constants'
@@ -27,4 +28,13 @@ export function runtimeTargetForWorktreeOwner(
     throw new Error(WORKTREE_REMOVAL_AMBIGUOUS_ERROR)
   }
   return target
+}
+
+/** The owner's transport and place together, refusing an unresolved owner. */
+export function hostRouteForWorktreeOwner(state: AppState, worktreeId: string): HostRoute {
+  const match = resolveOwner(state, { workspaceId: worktreeId })
+  if (match.kind !== 'resolved') {
+    throw new Error(WORKTREE_REMOVAL_AMBIGUOUS_ERROR)
+  }
+  return hostRouteForAuthority(match.owner)
 }

@@ -109,7 +109,7 @@ describe('hidden Chromium native popup request compatibility', () => {
       if (name === 'route') {
         expect(status().native.creation.at(-1)).toMatchObject({
           firstNavigationPolicy: 'disable_non_proxied_udp',
-          firstNavigationTitle: origin,
+          firstNavigationTitle: 'about:blank',
           firstNavigationOwner: expect.any(Number)
         })
       }

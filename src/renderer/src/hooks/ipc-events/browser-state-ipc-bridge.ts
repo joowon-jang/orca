@@ -11,7 +11,8 @@ import { acquireBrowserAutomationBootstrapLease } from './browser-automation-boo
 import {
   beginAgentInputFocusGuard,
   clearAgentInputFocusGuards,
-  endAgentInputFocusGuard
+  endAgentInputFocusGuard,
+  watchUserComposition
 } from '@/components/browser-pane/host-guest/agent-input-focus-guard'
 
 /**
@@ -104,16 +105,18 @@ export function registerBrowserStateIpcBridge(
   const unsubscribeAgentInputFocusGuard = window.api.browser.onAgentInputFocusGuard?.(
     ({ browserPageId, token, active }) => {
       if (active) {
-        beginAgentInputFocusGuard(browserPageId, token)
-        window.api.browser.agentInputFocusGuardReady(token)
+        const answer = beginAgentInputFocusGuard(browserPageId, token)
+        window.api.browser.agentInputFocusGuardReady(token, answer === 'composing')
       } else {
         endAgentInputFocusGuard(token)
       }
     }
   )
   if (unsubscribeAgentInputFocusGuard) {
+    const unwatchUserComposition = watchUserComposition()
     unsubs.push(() => {
       unsubscribeAgentInputFocusGuard()
+      unwatchUserComposition()
       clearAgentInputFocusGuards()
     })
   }

@@ -43,6 +43,10 @@ import {
   listDetectedGitWorktrees,
   rememberLocalWorktreeRoots
 } from './worktrees/listing/detected-worktree-scan-cache'
+import {
+  hostWorktreeTarget,
+  type HostWorktreeTarget
+} from '../../shared/worktree/host-qualified-identity'
 
 const path = '/remote/repository'
 const rows = [{ path, head: 'abc', branch: 'main', isBare: false, isMainWorktree: true }]
@@ -180,11 +184,13 @@ it.each(['git', 'folder'] as const)(
     if (kind === 'folder') {
       metaById[parentId].instanceId = undefined
     }
-    store.setWorktreeMeta.mockImplementation((id: string, updates: Partial<WorktreeMeta>) => {
-      const meta = mergeWorktreeMetaForWrite(metaById[id], updates)
-      metaById[id] = meta
-      return meta
-    })
+    store.setWorktreeMeta.mockImplementation(
+      ({ id }: HostWorktreeTarget, updates: Partial<WorktreeMeta>) => {
+        const meta = mergeWorktreeMetaForWrite(metaById[id], updates)
+        metaById[id] = meta
+        return meta
+      }
+    )
     Object.assign(store, {
       getRepos: () => [repo, parentRepo],
       getAllWorktreeMeta: () => metaById,
@@ -207,7 +213,10 @@ it.each(['git', 'folder'] as const)(
       status: 'complete',
       result: { worktrees: [expect.objectContaining({ id: childId, parentWorktreeId: parentId })] }
     })
-    expect(store.setWorktreeMeta).not.toHaveBeenCalledWith(parentId, expect.anything())
+    expect(store.setWorktreeMeta).not.toHaveBeenCalledWith(
+      hostWorktreeTarget({ id: parentId, hostId: 'local' }),
+      expect.anything()
+    )
     const parent = mocks.handlers.get('worktrees:listKnownForExecutionHost')!(null, {
       repoId: parentRepo.id,
       executionHostId: 'ssh:host-a'

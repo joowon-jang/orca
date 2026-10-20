@@ -42,19 +42,33 @@ export function holdsEditorFileId(
   )
 }
 
-export function editorTabFile<F extends FileOwner>(
-  workspace: { worktreeId: string; editorFiles?: readonly F[] },
-  entityId: string
-): F | undefined {
-  return workspace.editorFiles?.find((file) =>
-    editorTabShowsFile(entityId, file, workspace.worktreeId)
-  )
-}
-
 type EditorWorkspace<F> = {
   worktreeId: string
   tabs: readonly { entityId: string }[]
   editorFiles?: readonly F[]
+}
+
+/** The record an editor tab shows; in a layout-owner build a bare path skips owned-id tabs' records. */
+export function editorTabFile<F extends FileOwner>(
+  workspace: EditorWorkspace<F>,
+  entityId: string
+): F | undefined {
+  return ORCA_LAYOUT_OWNER_IS_MAIN
+    ? editorTabFiles(workspace, entityId)[0]
+    : workspace.editorFiles?.find((file) =>
+        editorTabShowsFile(entityId, file, workspace.worktreeId)
+      )
+}
+
+/** Whether an editor file id names this record, as `editorTabFile` resolves it. */
+export function editorTabNamesFile<F extends FileOwner>(
+  workspace: EditorWorkspace<F>,
+  entityId: string,
+  file: F
+): boolean {
+  return ORCA_LAYOUT_OWNER_IS_MAIN
+    ? editorTabFile(workspace, entityId) === file
+    : editorTabShowsFile(entityId, file, workspace.worktreeId)
 }
 
 /**

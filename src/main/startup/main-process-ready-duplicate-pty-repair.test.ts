@@ -44,6 +44,10 @@ vi.mock('./main-process-state', () => ({ mainProcessState: fixture.state }))
 vi.mock('../runtime/orca-runtime', () => ({
   OrcaRuntimeService: class {
     readonly sidebarFacts = null
+    readonly agentTransitions = { seedRestoredRows() {} }
+    attachAgentStatusStore() {
+      return () => {}
+    }
     getExistingOrchestrationDb() {
       return null
     }
