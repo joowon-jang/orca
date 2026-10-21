@@ -1,4 +1,5 @@
 import { resolveLoginShellEnvironment } from '../startup/login-shell-environment'
+import { refreshAtRestCommandContext } from '../native-chat/agent-session-wire/at-rest-command-context'
 import {
   mergePersistedWindowsPathAsync,
   readPersistedWindowsPathSegmentsAsync
@@ -110,6 +111,20 @@ export async function refreshHostAgentBaseEnvironmentAfterMiss(askedAt: number):
       ? readPersistedWindowsPathSegmentsAsync({ forceRefresh: true, startedAfter: askedAt })
       : resolveLoginShellEnvironment({ startedAfter: askedAt })
   ).catch(() => {})
+}
+
+/** Captures this host's shell env again now, so an explicit Refresh never reads a profile kept from
+ *  before it (Windows keeps a loaded one for good). */
+export async function recaptureHostShellEnvironment(): Promise<void> {
+  await refreshAtRestCommandContext(captureHostShellEnvironment)
+}
+
+export async function captureHostShellEnvironment(): Promise<void> {
+  const startedAfter = Date.now()
+  await Promise.all([
+    resolveLoginShellEnvironment({ startedAfter }),
+    readPersistedWindowsPathSegmentsAsync({ forceRefresh: true, startedAfter })
+  ]).catch(() => {})
 }
 
 /** The base env every local agent launch on this host starts from, read from current settings. */

@@ -48,15 +48,6 @@ describe('applyWindowLayoutCommand', () => {
     })
   })
 
-  it('closes a pane automatically with the user-close rules but stops no launch as the user’s', async () => {
-    const { store, applyLayoutCommand } = storeWith()
-
-    await applyWindowLayoutCommand(store, () => ['local'], { ...CLOSE, automatic: true })
-
-    expect(applyLayoutCommand).toHaveBeenCalledWith({ ...CLOSE, userPaneClose: true }, ['local'])
-    expect(mocks.markAgentLaunchesClosedByUser).not.toHaveBeenCalled()
-  })
-
   it('applies other commands to the routed partition only', async () => {
     const { store, applyLayoutCommand } = storeWith()
     const rename = { ...CLOSE, type: 'renamePane', title: 'Pane' } as const
@@ -192,7 +183,7 @@ describe('applyWindowLayoutCommand', () => {
       leafId: 'leaf-1',
       groupId: 'g1',
       // The window cannot name the new tab.
-      windowDetach: { ptyId: 'pty-1', tabId: 'tab-window' }
+      windowDetach: { ptyId: 'pty-1', tabId: 'tab-window', startupCwd: '/wt/app' }
     }
 
     await applyWindowLayoutCommand(
@@ -202,10 +193,10 @@ describe('applyWindowLayoutCommand', () => {
       onPaneMoved
     )
 
-    expect(applyLayoutCommand).toHaveBeenCalledWith({ ...move, windowDetach: { ptyId: 'pty-1' } }, [
-      'ssh:t',
-      'local'
-    ])
+    expect(applyLayoutCommand).toHaveBeenCalledWith(
+      { ...move, windowDetach: { ptyId: 'pty-1', startupCwd: '/wt/app' } },
+      ['ssh:t', 'local']
+    )
     expect(onPaneMoved).toHaveBeenCalledWith({
       worktreeId: 'wt-1',
       sourceTabId: 'term-1',

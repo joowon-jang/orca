@@ -16,7 +16,7 @@ import {
   getExecutionHostIdForWorktree,
   runtimeEnvironmentIdWithLegacyFallbackUnlessTwin
 } from '@/lib/worktree-runtime-owner'
-import { resolveOwner } from '@/lib/resolve-owner'
+import { isTwinWorkspace } from '@/lib/resolve-owner'
 import type { SearchResult } from '../../../../shared/code-search-types'
 import { runtimeTargetForOwnerEnvironment } from '@/runtime/runtime-client-target'
 
@@ -51,11 +51,7 @@ export function useFileSearchRunner({
     getExecutionHostIdForWorktree(state, activeWorktreeId)
   )
   // Why: a workspace two hosts publish names no owner, so either host's results would mislead.
-  const ownerIsTwin = useAppStore(
-    (state) =>
-      !!activeWorktreeId &&
-      resolveOwner(state, { workspaceId: activeWorktreeId }).kind === 'ambiguous'
-  )
+  const ownerIsTwin = useAppStore((state) => isTwinWorkspace(state, activeWorktreeId))
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Why: runtime searches can finish out of order; ids keep stale results
   // from overwriting the newest query state.

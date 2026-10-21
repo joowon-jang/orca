@@ -7,6 +7,9 @@ const idle = () => vi.fn()
 const stopAgentHookServer = idle()
 const killAllPty = settled()
 const stopStructuredAgentSessionRuntime = settled()
+const beginSshShutdown = settled()
+/** Final-save calls seen by the first microtask after the SSH shutdown began. */
+let flushesByNextMicrotask = -1
 
 // Keep unrelated teardown members settled so each test isolates its pending resource.
 const dependencies: Record<string, Record<string, unknown>> = {
@@ -15,7 +18,7 @@ const dependencies: Record<string, Record<string, unknown>> = {
   '../ipc/folder-repo-git-upgrade': { stopFolderRepoGitUpgradeWatch: idle() },
   '../ipc/pty/kill-all': { killAllPty },
   '../daemon/daemon-provider-state': { disconnectDaemon: settled(), shutdownDaemon: settled() },
-  '../ipc/ssh/ssh-shutdown-drain': { beginSshShutdown: settled() },
+  '../ipc/ssh/ssh-shutdown-drain': { beginSshShutdown },
   '../agent-hooks/server': { agentHookServer: { stop: stopAgentHookServer } },
   '../agent-hooks/wsl-hook-relay-manager': { wslHookRelayManager: { disposeAll: idle() } },
   '../agent-hooks/managed-agent-hook-controls': {
@@ -67,6 +70,8 @@ async function startQuit(
   services: Record<string, unknown> = {},
   shutdownLocalPtys: () => Promise<void> = async () => {}
 ) {
+  beginSshShutdown.mockClear()
+  flushesByNextMicrotask = -1
   vi.resetModules()
   vi.useFakeTimers()
   killAllPty.mockReset().mockImplementation(shutdownLocalPtys)
@@ -76,6 +81,11 @@ async function startQuit(
     flushFinalOrThrowAsync: vi.fn(flushFinalOrThrowAsync),
     freezeWritesAsync: settled()
   }
+  beginSshShutdown.mockImplementation(async () => {
+    void Promise.resolve().then(() => {
+      flushesByNextMicrotask = store.flushFinalOrThrowAsync.mock.calls.length
+    })
+  })
   const profileStateAdmission: typeof admission | undefined = admission
   const state = {
     isQuitting: false,
@@ -170,6 +180,57 @@ it('continues quitting when local PTY cleanup rejects', async () => {
   expect(app.quit).toHaveBeenCalledOnce()
 })
 
+it('flushes pending pane grids before the final save and waits for local PTY cleanup', async () => {
+  const ptyShutdown = Promise.withResolvers<void>()
+  const paneGrids = Promise.withResolvers<void>()
+  const { app, store } = await startQuit(
+    async () => {},
+    {
+      runtime: {
+        getOffscreenBrowserBackend: () => null,
+        getAgentBrowserBridge: () => null,
+        getEmulatorBridge: () => null,
+        disposeSkillUploadSessions: settled(),
+        getRuntimeId: () => undefined,
+        closeNotificationDismissals: settled(),
+        flushPaneGrids: () => paneGrids.promise
+      }
+    },
+    () => ptyShutdown.promise
+  )
+  await vi.advanceTimersByTimeAsync(0)
+  // Before the SSH shutdown too: nothing is awaited between it and the final save.
+  expect(beginSshShutdown).not.toHaveBeenCalled()
+  expect(killAllPty).not.toHaveBeenCalled()
+  expect(store.flushFinalOrThrowAsync).not.toHaveBeenCalled()
+  paneGrids.resolve()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(beginSshShutdown).toHaveBeenCalledOnce()
+  expect(killAllPty).toHaveBeenCalledOnce()
+  expect(app.quit).not.toHaveBeenCalled()
+  expect(store.flushFinalOrThrowAsync).toHaveBeenCalledOnce()
+  expect(beginSshShutdown.mock.invocationCallOrder[0]).toBeLessThan(
+    store.flushFinalOrThrowAsync.mock.invocationCallOrder[0]!
+  )
+  // Nothing awaited between them: the save started in the same turn as the SSH shutdown.
+  expect(flushesByNextMicrotask).toBe(1)
+  ptyShutdown.resolve()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(app.quit).toHaveBeenCalledOnce()
+})
+
+it('starts the SSH shutdown and the final save at once when no pane grid waits', async () => {
+  const { store } = await startQuit(async () => {})
+  expect(beginSshShutdown).toHaveBeenCalledOnce()
+  expect(store.flushFinalOrThrowAsync).toHaveBeenCalledOnce()
+  const order = [beginSshShutdown, killAllPty, store.flushFinalOrThrowAsync].map(
+    (step) => step.mock.invocationCallOrder[0]!
+  )
+  expect(order).toEqual([...order].sort((a, b) => a - b))
+  await vi.advanceTimersByTimeAsync(0)
+  expect(flushesByNextMicrotask).toBe(1)
+})
+
 // The chat teardown decides which chats to offer to resume from the hook server's status store,
 // and finishes after the hook server stops: that stop must leave the store readable.
 it('stops the hook server without clearing the status store the chat teardown reads', async () => {
@@ -196,7 +257,8 @@ it.each([
         getEmulatorBridge: () => null,
         disposeSkillUploadSessions: settled(),
         getRuntimeId: () => undefined,
-        closeNotificationDismissals
+        closeNotificationDismissals,
+        flushPaneGrids: () => null
       },
       runtimeRpc: { setMobileRelayPairingProvider: idle(), stop: vi.fn(() => rpcStop.promise) }
     })

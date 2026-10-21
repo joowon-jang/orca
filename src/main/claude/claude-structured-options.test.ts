@@ -38,7 +38,7 @@ function sessionFor(setModel: ClaudeSession['connection']['setModel']): ClaudeSe
     reportedOptions: {},
     reportedModelMutation: 0,
     confirmedOptions: new Set(),
-    restoreSkippedOptions: new Set(),
+    reusableOptions: new Map(),
     launchedModel: null,
     fastModeAtStart: false,
     capabilities: [],
@@ -346,6 +346,8 @@ describe('Claude structured Fast mode', () => {
     ).resolves.toMatchObject({ model: 'haiku', fastMode: 'false' })
     expect(session.reportedOptions.fastMode).toBe(true)
     expect(session.confirmedOptions.has('fastMode')).toBe(false)
+    expect(session.reusableOptions.get('model')).toBe('haiku')
+    expect(session.reusableOptions.has('fastMode')).toBe(false)
   })
 
   it('treats an unrecognized provider disabled reason as unavailable', async () => {
@@ -432,6 +434,19 @@ describe('Claude Fast mode reported by the session frame alone', () => {
     const result = await readClaudeStructuredSessionOptions(session, undefined)
 
     expect(result.current.fastMode).toBeUndefined()
+  })
+})
+
+describe("Claude's model the chat never chose", () => {
+  it('marks the listed default it falls back to, never a model the chat runs', async () => {
+    const { session } = fastModeSession(true)
+    const current = async () =>
+      (await readClaudeStructuredSessionOptions(session, undefined)).current
+    expect((await current()).defaulted).toBeUndefined()
+    session.options.delete('model')
+    expect(await current()).toMatchObject({ defaulted: ['model'] })
+    session.options.set('model', 'default')
+    expect(await current()).toMatchObject({ defaulted: ['model'] })
   })
 })
 

@@ -3,6 +3,7 @@ import {
   AGENT_SESSION_CONVERSATION_STOP_RUNTIME_CAPABILITY,
   AGENT_SESSION_QUEUED_COMMANDS_RUNTIME_CAPABILITY,
   AGENT_SESSION_QUEUED_MESSAGE_EDIT_RUNTIME_CAPABILITY,
+  AGENT_SESSION_QUEUED_MESSAGE_IMAGE_EDIT_RUNTIME_CAPABILITY,
   AGENT_SESSION_QUEUED_MESSAGES_RUNTIME_CAPABILITY,
   AGENT_SESSION_REWIND_RECOVERY_CAPABILITY,
   type RuntimeCapability
@@ -137,5 +138,15 @@ export function useStructuredAgentSessionHostEditsQueuedMessages(
   return useStructuredAgentSessionHostCapability(
     target,
     AGENT_SESSION_QUEUED_MESSAGE_EDIT_RUNTIME_CAPABILITY
+  )
+}
+
+/** Whether Save may send a queued card's image set; against an older host the edit is text only. */
+export function useStructuredAgentSessionHostEditsQueuedImages(
+  target: RuntimeClientTarget
+): boolean {
+  return useStructuredAgentSessionHostCapability(
+    target,
+    AGENT_SESSION_QUEUED_MESSAGE_IMAGE_EDIT_RUNTIME_CAPABILITY
   )
 }

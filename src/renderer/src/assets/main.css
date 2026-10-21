@@ -93,6 +93,7 @@
   --color-ring: var(--ring);
   --color-editor-surface: var(--editor-surface);
   --color-agent-question: var(--agent-question);
+  --color-agent-working: var(--agent-working);
   --color-agent-question-text: var(--agent-question-text);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
@@ -232,6 +233,8 @@
      it (sidebar, tabs, dashboard, kanban). Orange, not amber: it has to stay
      separable from working-yellow at a glance. */
   --agent-question: var(--color-orange-600);
+  /* The working-state yellow every agent working/monitoring glyph paints. */
+  --agent-working: var(--color-yellow-500);
   /* Legible weight for text/glyphs on a tinted --agent-question surface. */
   --agent-question-text: var(--color-orange-700);
   /* Workspace PR-state tones: same hue in both themes so a status keeps its

@@ -77,10 +77,26 @@ export function toRuntimeExecutionHostId(environmentId: string): `runtime:${stri
 // SSH/run-target surfaces. The renderer can't read the target.owner field, so it
 // recognizes them by their deterministic id prefix. getRuntimeOwnedSshTargetId
 // (main) builds on this same prefix to keep the two in sync.
+// The prefix also means "address and filesystem are replaced every provision", so only
+// on-demand-runtime owners may use it; main decides hidden-ness from `owner` alone.
 export const RUNTIME_OWNED_SSH_TARGET_ID_PREFIX = 'runtime-ssh-'
+/** Machine-provider targets: owned like recipe VMs, but persistent, so not `runtime-ssh-`. */
+export const MACHINE_SSH_TARGET_ID_PREFIX = 'machine-'
 
+/** A recipe VM's target, whose address and filesystem are replaced every provision. */
 export function isRuntimeOwnedSshTargetId(targetId: string | null | undefined): boolean {
   return typeof targetId === 'string' && targetId.startsWith(RUNTIME_OWNED_SSH_TARGET_ID_PREFIX)
+}
+
+/**
+ * Any target Orca owns as plumbing, by id because the renderer never sees `owner`: hidden from
+ * SSH-host surfaces and never dialed by the renderer, which would dispose its owner's session.
+ */
+export function isOwnedSshTargetId(targetId: string | null | undefined): boolean {
+  return (
+    isRuntimeOwnedSshTargetId(targetId) ||
+    (typeof targetId === 'string' && targetId.startsWith(MACHINE_SSH_TARGET_ID_PREFIX))
+  )
 }
 
 export function parseExecutionHostId(value: string | null | undefined): ParsedExecutionHost | null {
@@ -261,6 +277,17 @@ export function getRepoSshConnectionId(
     return host.targetId
   }
   return host?.kind === 'runtime' ? normalizeHostPart(repo.connectionId) : null
+}
+
+/**
+ * Replaces a raw `repo.connectionId` in a routing or "is this SSH?" check. Never answers local for
+ * a row whose raw field is set, and also finds a row that names SSH only as `ssh:<target>`. On a
+ * contradictory `ssh:B` row with `connectionId: 'A'`, B wins, as in `getRepoExecutionHostId`.
+ */
+export function getRepoRoutingConnectionId(
+  repo: Pick<Repo, 'connectionId' | 'executionHostId'>
+): string | null {
+  return getRepoSshConnectionId(repo) ?? normalizeHostPart(repo.connectionId)
 }
 
 export function getWorktreeExecutionHostId(

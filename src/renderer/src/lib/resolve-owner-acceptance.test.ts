@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { ExecutionHostOwnerMatch } from '../../../shared/worktree-execution-host-resolution'
 import type { HostAuthority } from '../../../shared/host-authority'
-import {
-  getRuntimeEnvironmentIdForWorktree,
-  resolveOwnerWithLegacyFallback
-} from './worktree-runtime-owner'
+import { resolveOwnerWithLegacyFallback } from './worktree-runtime-owner'
 import { OWNER_RESOLUTION_CASES } from './runtime-owner-alias-matrix.test-fixture'
 import { LEGACY_FALLBACK_OWNER_ACCEPTANCE } from './resolve-owner-acceptance.test-fixture'
+import { LEGACY_RUNTIME_OWNER_GOLDEN } from './legacy-runtime-owner-answers.test-fixture'
 import type { WorktreeRuntimeOwnerState } from './worktree-runtime-owner-state'
 
 function describeMatch(match: ExecutionHostOwnerMatch<HostAuthority>): string {
@@ -29,7 +27,10 @@ const DELIBERATE_CHANGES: Record<string, string> = {
   'folder:group-twin-folder': 'D77',
   'rival-repo::wt': 'B: servers contest the SSH host',
   'conflict-repo::wt': 'B',
-  'stale-hub-repo::wt': 'C: reached through the server whose repo row names the target'
+  'stale-hub-repo::wt': 'C: reached through the server whose repo row names the target',
+  'legacy-repo::wt': 'an unstamped row is local; the Active Server focus never claims it',
+  'folder:unstamped-folder': 'same',
+  'folder:missing-folder': 'same'
 }
 
 describe('resolveOwnerWithLegacyFallback acceptance (round-3 design §5)', () => {
@@ -50,10 +51,9 @@ describe('resolveOwnerWithLegacyFallback acceptance (round-3 design §5)', () =>
         owner.kind === 'resolved' && owner.owner.endpoint.kind === 'environment'
           ? owner.owner.endpoint.environmentId
           : null
-      return (
-        owner.kind !== 'resolved' ||
-        environmentId !== getRuntimeEnvironmentIdForWorktree(c.state, c.worktreeId)
-      )
+      const legacy = LEGACY_RUNTIME_OWNER_GOLDEN[c.name]
+      // Why: the deprecated environment-id reader collapsed `ambiguous` to `null`.
+      return owner.kind !== 'resolved' || environmentId !== (legacy === 'ambiguous' ? null : legacy)
     })
     for (const c of changed) {
       expect(DELIBERATE_CHANGES[c.worktreeId], c.name).toBeDefined()
@@ -88,12 +88,12 @@ describe('resolveOwnerWithLegacyFallback probes', () => {
     expect(ownerOf(single, 'onboarding-setup::/tmp/skill')).toBe('self@local')
   })
 
-  it('sends a known unstamped repo with no worktree row to the single focused runtime, as spawn does', () => {
+  it('keeps a known unstamped repo with no worktree row local under single focus', () => {
     const noWorktreeRow = {
       ...single,
       worktreesByRepo: { ...single.worktreesByRepo, 'legacy-repo': [] }
     }
-    expect(ownerOf(noWorktreeRow, 'legacy-repo::wt')).toBe('env:focused-env@local')
+    expect(ownerOf(noWorktreeRow, 'legacy-repo::wt')).toBe('self@local')
   })
 
   it('lets a named host win over the single focused runtime', () => {
@@ -117,6 +117,5 @@ describe('resolveOwnerWithLegacyFallback probes', () => {
       }
     }
     expect(ownerOf(withDetected, 'repo-twin-only::wt')).toBe('self@local')
-    expect(getRuntimeEnvironmentIdForWorktree(withDetected, 'repo-twin-only::wt')).toBeNull()
   })
 })

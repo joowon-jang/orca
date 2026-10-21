@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -22,14 +23,23 @@ import {
 import { posixProcessGroupCommand } from './orcad-state-mutation-owner-record'
 import { getRemoteHostPlatform } from '../../ssh/ssh-remote-platform'
 import { quotePosixShell } from '../../../shared/shell-argument-quoting'
+import { wrapRemoteCommandForPosixShell } from '../../ssh/ssh-posix-command-wrapper'
+import {
+  ORCAD_FENCE_OWNER_FILENAME,
+  runWithOrcadFence
+} from '../activation/orcad-activation-fence-scope'
 
 const posix = getRemoteHostPlatform('linux-x64')
 
 // Linux hosts often run dash as /bin/sh; its builtins differ from bash's (`kill -- -pgid`).
 const SHELL = process.env.ORCA_TEST_POSIX_SHELL ?? '/bin/sh'
 
-async function sh(command: string): Promise<string> {
-  const result = await runProcess({ program: SHELL, args: ['-c', command] })
+async function sh(command: string, env?: NodeJS.ProcessEnv): Promise<string> {
+  const result = await runProcess({
+    program: SHELL,
+    args: ['-c', command],
+    ...(env ? { env: { ...process.env, ...env } } : {})
+  })
   return result.stdout
 }
 
@@ -54,6 +64,37 @@ describe.skipIf(process.platform === 'win32')('snapshot commands on a real shell
     rmSync(base, { recursive: true, force: true })
   })
 
+  it('captures and restores fenced state through a gateway with a 10 KiB exec limit', async () => {
+    const fence = { lockDir: join(remoteBase, 'activation.lock'), token: 'snapshot-test-owner' }
+    mkdirSync(fence.lockDir, { recursive: true })
+    writeFileSync(join(fence.lockDir, ORCAD_FENCE_OWNER_FILENAME), fence.token)
+    const throughGateway = (command: string): Promise<string> => {
+      const wrapped = wrapRemoteCommandForPosixShell(command)
+      const forwarded = Buffer.from(wrapped)
+        .subarray(0, 10 * 1_024)
+        .toString()
+      // The affected gateway both truncates exec requests and merges stderr into stdout.
+      return sh(`${forwarded} 2>&1`)
+    }
+
+    await runWithOrcadFence(fence, async () => {
+      expect(
+        parseOrcadSnapshotCapture(
+          await throughGateway(captureOrcadStateSnapshotCommand(posix, root, snapshot, remoteBase))
+        )
+      ).toBe('captured')
+      writeFileSync(join(root, 'profiles', 'p.json'), 'migrated')
+      expect(
+        parseOrcadSnapshotRestore(
+          await throughGateway(restoreOrcadStateSnapshotCommand(posix, root, snapshot, remoteBase))
+        )
+      ).toBe('restored')
+    })
+
+    expect(readFileSync(join(root, 'profiles', 'p.json'), 'utf8')).toBe('old')
+    expect(existsSync(join(remoteBase, 'orcad-state-mutation.lock'))).toBe(false)
+  })
+
   it('restores members, drops files the newer build added, and leaves the daemon alone', async () => {
     expect(
       parseOrcadSnapshotCapture(
@@ -73,6 +114,25 @@ describe.skipIf(process.platform === 'win32')('snapshot commands on a real shell
     expect(existsSync(join(root, 'profiles', 'added.json'))).toBe(false)
     expect(readFileSync(join(root, 'daemon', 'token'), 'utf8')).toBe('rotated')
     expect(existsSync(join(root, '.orcad-state-restore-stage'))).toBe(false)
+  })
+
+  it('captures on a BusyBox before 1.30, whose timeout only takes `-t SECS`', async () => {
+    const bin = join(base, 'bin')
+    mkdirSync(bin)
+    // Old BusyBox reads a bare `900` as the program to run.
+    writeFileSync(
+      join(bin, 'timeout'),
+      '#!/bin/sh\n[ "$1" = "-t" ] || exit 127\nshift 2\n[ "$1" = "-s" ] && shift 2\nexec "$@"\n'
+    )
+    chmodSync(join(bin, 'timeout'), 0o755)
+
+    expect(
+      parseOrcadSnapshotCapture(
+        await sh(captureOrcadStateSnapshotCommand(posix, root, snapshot, remoteBase), {
+          PATH: `${bin}:${process.env.PATH ?? ''}`
+        })
+      )
+    ).toBe('captured')
   })
 
   it('keeps live state when the archive cannot be extracted', async () => {
@@ -99,6 +159,28 @@ describe.skipIf(process.platform === 'win32')('snapshot commands on a real shell
         await sh(restoreOrcadStateSnapshotCommand(posix, root, snapshot, remoteBase))
       )
     ).toBe('restored')
+    expect(readFileSync(join(root, 'profiles', 'p.json'), 'utf8')).toBe('old')
+  })
+
+  it('fails a restore whose member cannot move in, then reruns cleanly from the archive', async () => {
+    await sh(captureOrcadStateSnapshotCommand(posix, root, snapshot, remoteBase))
+    writeFileSync(join(root, 'profiles', 'p.json'), 'migrated')
+    // A `mv` that refuses only the profiles member, so the restore stops part way through.
+    const bin = join(base, 'bin')
+    mkdirSync(bin)
+    const mvPath = (await runProcess({ program: SHELL, args: ['-c', 'command -v mv'] })).stdout
+    writeFileSync(
+      join(bin, 'mv'),
+      `#!/bin/sh\ncase "$1" in *profiles) exit 1;; esac\nexec ${mvPath.trim()} "$@"\n`,
+      { mode: 0o755 }
+    )
+    const restore = restoreOrcadStateSnapshotCommand(posix, root, snapshot, remoteBase)
+
+    const failed = await sh(restore, { PATH: `${bin}:${process.env.PATH ?? ''}` })
+    expect(parseOrcadSnapshotRestore(failed)).toBe('failed')
+    expect(existsSync(join(root, '.orcad-state-restore-stage', 'profiles'))).toBe(true)
+
+    expect(parseOrcadSnapshotRestore(await sh(restore))).toBe('restored')
     expect(readFileSync(join(root, 'profiles', 'p.json'), 'utf8')).toBe('old')
   })
 

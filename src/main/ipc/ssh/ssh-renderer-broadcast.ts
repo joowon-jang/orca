@@ -5,7 +5,7 @@ import type {
   EnrichedDetectedPort,
   SshConnectionState
 } from '../../../shared/ssh-types'
-import { isRuntimeOwnedSshTargetId } from '../../../shared/execution-host'
+import { isOwnedSshTargetId } from '../../../shared/execution-host'
 import {
   enrichSshDetectedPorts,
   enrichSshForwardEntries,
@@ -31,7 +31,7 @@ export function broadcastSshState(
 ): void {
   const target = getSshTargetRegistryStore()?.getTarget(targetId)
   // Why: owned targets are hidden from clients; broadcasting them leaks internal transport state into persisted reconnect hints.
-  if (isRuntimeOwnedSshTargetId(targetId) || (target && isRuntimeOwnedSshTarget(target))) {
+  if (isOwnedSshTargetId(targetId) || (target && isRuntimeOwnedSshTarget(target))) {
     currentRuntime?.invalidateSshWorktreeScanCache?.(targetId)
     return
   }

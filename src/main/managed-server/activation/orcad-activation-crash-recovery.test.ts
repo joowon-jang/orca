@@ -82,7 +82,8 @@ const deploy = (): Promise<unknown> =>
     ...slot,
     localOrcadDir: '/local/out/orcad',
     target: 'linux-x64-glibc',
-    census
+    census,
+    recountCensus: async () => census
   })
 const deployFromNewerApp = (): Promise<unknown> =>
   deployOrcad({
@@ -90,6 +91,7 @@ const deployFromNewerApp = (): Promise<unknown> =>
     localOrcadDir: '/local/out/orcad',
     target: 'linux-x64-glibc',
     census,
+    recountCensus: async () => census,
     appVersion: '1.9.0'
   })
 const rollback = (): Promise<unknown> =>
@@ -142,7 +144,10 @@ function expectExactlyTheRecordedSlot(): void {
 
 /** Unconfirmed termination never deletes a slot directory or a snapshot. */
 function expectNoSlotOrSnapshotRemoved(): void {
-  const removals = host.commands.filter((command) => /\brm -r?f\b/u.test(command))
+  const removals = host.commands
+    .filter((command) => /\brm -r?f\b/u.test(command))
+    // A failed capture's own partial archive was never a snapshot.
+    .map((command) => command.replace(/rm -f '[^']*\/state\.tar'\.partial/gu, ''))
   for (const command of removals) {
     // A file inside a slot (a consumed stop request) may go; the slot directory never does.
     expect(command).not.toMatch(/rm -r?f '[^']*\/orcad-\d[^'/]*\/?'/u)

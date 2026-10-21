@@ -11,6 +11,7 @@ export const ATTENTION_READ = {
 } as const
 export const REWIND_METHOD = 'agentSession.rewind'
 export const CONVERSATION_OUTLINE_METHOD = 'agentSession.conversationOutline'
+export const ITEM_DETAIL_METHOD = 'agentSession.item'
 export const STATUS_FEED_METHOD = 'agentSession.subscribeStatus'
 export const TURN_COMPLETION_FEED_METHOD = 'agentSession.subscribeTurnCompletions'
 
@@ -79,6 +80,11 @@ export const STRUCTURED_CALLS: {
     result: { ok: true, replayed: false, value: { itemId: 'item-1', epoch: 'rewound-epoch' } }
   },
   { method: 'agentSession.close', hostMethod: 'close', result: { ok: true } },
+  {
+    method: 'agentSession.sleepWorkspace',
+    hostMethod: 'sleepWorkspace',
+    result: { stoppedSessionIds: [] }
+  },
   {
     method: 'agentSession.respondToApproval',
     hostMethod: 'respondToPrompt',
@@ -177,6 +183,11 @@ export const STRUCTURED_CALLS: {
     hostMethod: 'journalSnapshot',
     result: { sessionId: SESSION, entries: [], omittedEntries: 0 }
   },
+  {
+    method: ITEM_DETAIL_METHOD,
+    hostMethod: 'journalSnapshot',
+    result: { item: null }
+  },
   // A subscription that opens with nothing to say answers with no reply at all,
   // so reaching the host is the only signal that the gate opened.
   { method: 'agentSession.subscribe', hostMethod: 'subscribe' },
@@ -210,5 +221,12 @@ export const STRUCTURED_CALLS: {
     method: 'agentSession.agents',
     hostMethod: null,
     result: { agents: expect.arrayContaining([expect.objectContaining({ agent: 'codex' })]) }
+  },
+  // Answered from the runtime's shared availability resource, not the host, so the stub's first
+  // generation is the only signal that the gate opened.
+  {
+    method: 'agentSession.subscribeAvailability',
+    hostMethod: null,
+    result: { type: 'availability', agents: [] }
   }
 ]

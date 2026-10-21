@@ -21,6 +21,10 @@ import {
   type RuntimeMobileMarkdownRequest,
   type RuntimeMobileMarkdownResponse
 } from '../../../shared/mobile-markdown-document'
+import {
+  rollBackFailedMobileSave,
+  stampMobileVerifiedBaseline
+} from './mobile-markdown-save-rollback'
 
 const saveQueues = new Map<string, Promise<void>>()
 
@@ -117,10 +121,20 @@ async function saveMobileMarkdownTab(
     }
 
     const state = useAppStore.getState()
-    const previousDraft = state.editorDrafts[freshTarget.sourceFile.id]
-    const previousDirty = freshTarget.sourceFile.isDirty
-    state.setEditorDraft(freshTarget.sourceFile.id, content)
-    state.markFileDirty(freshTarget.sourceFile.id, true)
+    // Why live: a desktop save during the read moved the baseline past the version the phone saw.
+    const sourceFile = state.openFiles.find((file) => file.id === freshTarget.sourceFile.id)
+    if (!sourceFile) {
+      throw new Error('tab_not_found')
+    }
+    // Why: desktop typing during the disk read is newer than the version the phone edited.
+    if (current.source === 'file' && state.editorDrafts[sourceFile.id] !== undefined) {
+      throw new Error('conflict')
+    }
+    const stampedBaseline = stampMobileVerifiedBaseline(sourceFile, current)
+    const previousDraft = state.editorDrafts[sourceFile.id]
+    const previousDirty = sourceFile.isDirty
+    state.setEditorDraft(sourceFile.id, content)
+    state.markFileDirty(sourceFile.id, true)
     let verified: string
     try {
       await waitForPositiveSave(freshTarget.sourceFile, content)
@@ -129,8 +143,13 @@ async function saveMobileMarkdownTab(
         throw new Error('save_verification_failed')
       }
     } catch (error) {
-      restoreFailedMobileSaveDraft(freshTarget.sourceFile.id, content, previousDraft, previousDirty)
-      throw error
+      throw rollBackFailedMobileSave(error, {
+        fileId: freshTarget.sourceFile.id,
+        injectedContent: content,
+        previousDraft,
+        previousDirty,
+        stampedBaseline
+      })
     }
 
     return {
@@ -140,27 +159,6 @@ async function saveMobileMarkdownTab(
       content: verified
     }
   })
-}
-
-function restoreFailedMobileSaveDraft(
-  fileId: string,
-  injectedContent: string,
-  previousDraft: string | undefined,
-  previousDirty: boolean
-): void {
-  const state = useAppStore.getState()
-  const currentDraft = state.editorDrafts[fileId]
-  if (currentDraft !== undefined && currentDraft !== injectedContent) {
-    return
-  }
-  // Why: mobile save injects a desktop draft only to reuse the editor save path.
-  // If save or verification fails, put the desktop editor back exactly as it was before.
-  if (previousDraft === undefined) {
-    state.clearEditorDraft(fileId)
-  } else {
-    state.setEditorDraft(fileId, previousDraft)
-  }
-  state.markFileDirty(fileId, previousDirty)
 }
 
 async function enqueueMarkdownSave<T>(fileId: string, save: () => Promise<T>): Promise<T> {
@@ -299,7 +297,7 @@ async function waitForPositiveSave(file: OpenFile, content: string): Promise<voi
     if (!liveFile) {
       throw new Error('tab_not_found')
     }
-    await requestEditorFileSave({ fileId: file.id, fallbackContent: content })
+    await requestEditorFileSave({ fileId: file.id, fallbackContent: content, origin: 'mobile' })
     await saved
   } catch (error) {
     cleanup()

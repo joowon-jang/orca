@@ -44,21 +44,24 @@ export function launchAiVaultSessionInNewTab(args: {
       ? store.createEmptySplitGroup(args.worktreeId, split.sourceGroupId, split.splitDirection)
       : null
     const targetGroupId = splitGroupId ?? args.targetGroupId
-    const runtimeLaunch = createWebRuntimeSessionTerminal({
-      worktreeId: args.worktreeId,
-      environmentId: runtimeEnvironmentId,
-      ...(targetGroupId ? { targetGroupId } : {}),
-      agentSessionKind: 'resume',
-      launchAgent: args.agent,
-      command: args.command,
-      ...(args.cwd ? { cwd: args.cwd } : {}),
-      ...(args.env ? { env: args.env } : {}),
-      ...(args.envToDelete ? { envToDelete: args.envToDelete } : {}),
-      ...(args.launchConfig ? { launchConfig: args.launchConfig } : {}),
-      ...(args.providerSession ? { providerSession: args.providerSession } : {}),
-      ...(args.launchConfig ? { agentArgs: args.launchConfig.agentArgs } : {}),
-      activate: true
-    })
+    const runtimeLaunch = createWebRuntimeSessionTerminal(
+      {
+        worktreeId: args.worktreeId,
+        environmentId: runtimeEnvironmentId,
+        ...(targetGroupId ? { targetGroupId } : {}),
+        agentSessionKind: 'resume',
+        launchAgent: args.agent,
+        command: args.command,
+        ...(args.cwd ? { cwd: args.cwd } : {}),
+        ...(args.env ? { env: args.env } : {}),
+        ...(args.envToDelete ? { envToDelete: args.envToDelete } : {}),
+        ...(args.launchConfig ? { launchConfig: args.launchConfig } : {}),
+        ...(args.providerSession ? { providerSession: args.providerSession } : {}),
+        ...(args.launchConfig ? { agentArgs: args.launchConfig.agentArgs } : {}),
+        activate: true
+      },
+      { notifyFailure: false }
+    )
     const observedRuntimeLaunch = runtimeLaunch.then((outcome) => {
       if (outcome.status === 'created') {
         useAppStore.getState().setActiveTabType('terminal', args.worktreeId)

@@ -12,6 +12,8 @@ import type { Worktree as HostWorktree } from '../../../src/shared/worktree/type
 import { composeWorktreeHostIdentity } from '../../../src/shared/worktree/host-qualified-identity'
 import type { Section, Worktree } from '../worktree/workspace-list-types'
 import { resolveWorktreeHostId } from '../worktree/worktree-host-context-labels'
+import { filterWorktrees } from '../worktree/workspace-list-sections'
+import { rowFiltersForView, type MobileViewState } from '../worktree/workspace-view-settings'
 
 /** What the host screen draws from a feed-built list, besides its rows' own live content. */
 export type HostFeedListSources = {
@@ -56,29 +58,32 @@ function indexLiveRows(
   return (id, hostId) => byIdentity.get(composeWorktreeHostIdentity(hostId, id))
 }
 
-/** A row worktree.ps has not listed yet: drawn from the feed alone, with no live content. */
-function feedOnlyRow(
+/** Only worktree.ps carries these; a row it has not listed yet draws without them. */
+const NO_LIVE_CONTENT = { liveTerminalCount: 0, hasAttachedPty: false, linkedPR: null }
+
+/** What the feed carries comes from the feed: an older worktree.ps row adds only what it lacks. */
+function drawnRow(
   worktree: HostWorktree,
   hostId: ExecutionHostId,
-  repoName: string,
-  workspaceKind: Worktree['workspaceKind']
+  repoName: string | undefined,
+  workspaceKind: Worktree['workspaceKind'],
+  live: Worktree | undefined
 ): Worktree {
   return {
+    ...(live ?? NO_LIVE_CONTENT),
     worktreeId: worktree.id,
     repoId: worktree.repoId,
     hostId,
     workspaceKind,
-    repo: repoName,
+    repo: repoName ?? live?.repo ?? '',
     branch: worktree.branch,
     displayName: worktree.displayName,
+    comment: worktree.comment,
     path: worktree.path,
     isArchived: worktree.isArchived,
     isMainWorktree: worktree.isMainWorktree,
-    liveTerminalCount: 0,
-    hasAttachedPty: false,
     unread: worktree.isUnread,
-    isPinned: worktree.isPinned,
-    linkedPR: null
+    isPinned: worktree.isPinned
   }
 }
 
@@ -102,10 +107,9 @@ export function buildHostFeedSections(sources: HostFeedListSources): Section[] {
   const rowOf = (
     worktree: HostWorktree,
     hostId: ExecutionHostId,
-    repoName: string,
+    repoName: string | undefined,
     workspaceKind: Worktree['workspaceKind']
-  ): Worktree =>
-    liveRowOf(worktree.id, hostId) ?? feedOnlyRow(worktree, hostId, repoName, workspaceKind)
+  ): Worktree => drawnRow(worktree, hostId, repoName, workspaceKind, liveRowOf(worktree.id, hostId))
   const push = (section: Section) => sections.push(section)
   const current = (): Section => {
     const last = sections.at(-1)
@@ -135,10 +139,9 @@ export function buildHostFeedSections(sources: HostFeedListSources): Section[] {
       case 'item': {
         // Local as the fallback, as the phone resolves its own rows: the desktop's focus is not an owner.
         const hostId = getWorktreeExecutionHostId(row.worktree, row.repo, LOCAL_EXECUTION_HOST_ID)
-        const live = rowOf(row.worktree, hostId, row.repo?.displayName ?? '', 'git')
+        const drawn = rowOf(row.worktree, hostId, row.repo?.displayName, 'git')
         current().data.push({
-          ...live,
-          isPinned: row.worktree.isPinned,
+          ...drawn,
           isActive: sources.activeRowKeys.has(row.rowKey),
           sectionListKey: row.rowKey,
           lineageDepth: row.depth,
@@ -150,7 +153,7 @@ export function buildHostFeedSections(sources: HostFeedListSources): Section[] {
           // The desktop's mixed-host rule names the host; a health word alone still shows.
           hostContextLabel:
             row.hostContextLabel ??
-            (live.hostContextHealthLabel ? live.hostContextLabel : undefined)
+            (drawn.hostContextHealthLabel ? drawn.hostContextLabel : undefined)
         })
         break
       }
@@ -163,21 +166,52 @@ export function buildHostFeedSections(sources: HostFeedListSources): Section[] {
         )
         current().data.push({
           ...rowOf(worktree, hostId, row.projectGroup.name, 'folder-workspace'),
-          isPinned: row.folderWorkspace.isPinned,
           isActive: sources.activeRowKeys.has(row.key),
           sectionListKey: row.key,
           lineageDepth: 0
         })
         break
       }
-      // A creation in progress and the desktop-only cards draw nothing on the phone.
-      case 'pending-creation':
+      case 'pending-creation': {
+        const section = current()
+        section.pendingCreations ??= []
+        section.pendingCreations.push({
+          key: row.key,
+          // A project header already names it.
+          repoName:
+            section.repo && section.repo.id === row.repo?.id
+              ? null
+              : (row.repo?.displayName ?? null)
+        })
+        break
+      }
+      // The desktop-only cards draw nothing on the phone.
       case 'imported-worktrees-card':
       case 'new-external-worktrees-inbox':
         break
     }
   }
   return query ? narrowSections(sections, query) : sections
+}
+
+/**
+ * Before the first feed read: the rows this page last listed (worktree.ps, or the cache the screen
+ * opened with) under the view's filters, in their served order and no header, so an offline open
+ * is not blank.
+ */
+export function buildPreFeedSections(sources: {
+  rows: Worktree[]
+  view: MobileViewState
+  search: string
+  repoHostIdByRepoId: ReadonlyMap<string, ExecutionHostId>
+}): Section[] {
+  const rows = filterWorktrees(
+    sources.rows,
+    rowFiltersForView(sources.view),
+    sources.search,
+    sources.repoHostIdByRepoId
+  )
+  return rows.length > 0 ? [{ key: 'all', title: '', data: rows }] : []
 }
 
 /** A section whose title matches keeps every row; otherwise only matching rows, counted as shown. */
@@ -187,6 +221,9 @@ function narrowSections(sections: readonly Section[], query: string): Section[] 
       return [section]
     }
     const data = section.data.filter((row) => matchesSearch(row, query))
-    return data.length > 0 ? [{ ...section, data, count: data.length }] : []
+    // Only matching rows: a creation has no name to match yet.
+    return data.length > 0
+      ? [{ ...section, data, count: data.length, pendingCreations: undefined }]
+      : []
   })
 }

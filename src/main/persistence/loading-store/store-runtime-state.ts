@@ -1,7 +1,11 @@
 import { removeStaleDurableWriteTempFiles } from '../../durable-file-write'
 import type { GlobalSettings } from '../../../shared/global-settings-types'
 import type { PersistedState } from '../../../shared/persisted-state-types'
-import type { WorkspaceSessionWriteListener } from './workspace-session-write-listeners'
+import type {
+  WorkspaceSessionOperationListener,
+  WorkspaceSessionWriteListener
+} from './workspace-session-write-listeners'
+import type { ExecutionHostId } from '../../../shared/execution-host'
 import type { StateWriteListener } from './write-scheduling'
 import type { ActiveViewPreference } from '../../active-view-preference'
 import {
@@ -32,6 +36,8 @@ export type DurableProfileStateMutation<T> = {
   /** 'if-dirty' fences an existing change without rewriting an already durable generation. */
   persist?: boolean | 'if-dirty'
   rollback?: () => void
+  /** The only session partitions the mutation wrote, so readers re-read just those; absent: any. */
+  writtenHostIds?: readonly ExecutionHostId[]
 }
 
 export type StoreRuntimeOptions = {
@@ -74,6 +80,11 @@ export class StoreRuntimeState {
   quitFlushPromise: Promise<void> | null = null
   lastWrittenStateHash: string | null = null
   lastDurableWriteGeneration = -1
+  /**
+   * The write generation each migration committed by this process needs on disk before its
+   * received blobs may be consumed; a receipt missing here was read from disk.
+   */
+  readonly orcadMigrationCommitWriteGenerations = new Map<string, number>()
   firstPendingSaveAt: number | null = null
   /** Known dirty domains, or null when a caller requires a complete-document fallback. */
   dirtyProfileStateDomains: Set<string> | null = new Set()
@@ -99,6 +110,10 @@ export class StoreRuntimeState {
   uiChangeListeners = new Set<(ui: PersistedState['ui']) => void>()
   /** Observers of persisted workspace-session writes; see notifyWorkspaceSessionWritten. */
   readonly workspaceSessionWriteListeners = new Set<WorkspaceSessionWriteListener>()
+  /** Observers of each durable mutation's end; see notifyWorkspaceSessionOperationEnded. */
+  readonly workspaceSessionOperationListeners = new Set<WorkspaceSessionOperationListener>()
+  /** `${hostId}\0${leafId}` → its pane's binding generation, in memory only (layout-owner builds). */
+  readonly ptyBindingGenerations = new Map<string, number>()
   /** Observers of every write; see WriteSchedulingOperations.onStateWritten. */
   readonly stateWriteListeners = new Set<StateWriteListener>()
   projectHostOperations: ProjectHostPersistenceOperations | null = null

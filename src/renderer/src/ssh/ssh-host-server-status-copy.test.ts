@@ -2,18 +2,32 @@ import { describe, expect, it } from 'vitest'
 import type { SshManagedServerUpdateNote } from '../../../shared/ssh-types'
 import { sshConnectFailureText, sshHostServerStatusLine } from './ssh-host-server-status-copy'
 
-const plain = {}
+const plain = { label: 'Box' }
 
 describe('SSH host server status line', () => {
   it('says nothing for a plain host before any decision', () => {
     expect(sshHostServerStatusLine(plain, undefined)).toBeNull()
   })
 
+  it('names the host while setting up and says the code stays where it is', () => {
+    expect(
+      sshHostServerStatusLine(plain, { managedServer: { kind: 'setting-up', phase: 'converting' } })
+    ).toEqual({
+      tone: 'muted',
+      text: 'Moving to Orca on Box…',
+      hint: 'Runs on Box, reached over your own SSH connection. Your code and files stay where they are. Only Orca’s list of projects, tabs and terminals moves to Box.'
+    })
+    // A reconnect of a host that already moved starts its server; nothing moves then.
+    expect(
+      sshHostServerStatusLine(plain, { managedServer: { kind: 'setting-up', phase: 'starting' } })
+    ).toEqual({ tone: 'muted', text: 'Starting Orca on Box…' })
+  })
+
   it('shows startup progress and preserves the cause of unverifiable server contact', () => {
     expect(
       sshHostServerStatusLine(plain, { managedServer: { kind: 'setting-up', phase: 'starting' } })
         ?.text
-    ).toBe('Starting managed server…')
+    ).toBe('Starting Orca on Box…')
     const detail = 'orcad did not become ready.\nLast lines of orcad.log:\nboom'
     expect(
       sshHostServerStatusLine(plain, {
@@ -25,13 +39,13 @@ describe('SSH host server status line', () => {
       })
     ).toEqual({
       tone: 'warning',
-      text: 'Orca couldn’t confirm that the managed server is answering.',
+      text: 'Orca couldn’t confirm that its server on Box is answering.',
       detail
     })
   })
 
   it.each([
-    'The managed Orca server process is live but is not answering.',
+    'This host’s Orca server process is live but is not answering.',
     'SSH operation was cancelled',
     'SSH transport closed before the server answered'
   ])('does not infer process exit from unverifiable contact: %s', (detail) => {
@@ -46,7 +60,7 @@ describe('SSH host server status line', () => {
       })
     ).toEqual({
       tone: 'warning',
-      text: 'Orca couldn’t confirm that the managed server is answering.',
+      text: 'Orca couldn’t confirm that its server on Box is answering.',
       detail
     })
   })
@@ -58,7 +72,7 @@ describe('SSH host server status line', () => {
       })
     ).toEqual({
       tone: 'warning',
-      text: 'Terminals on this Mac may have lost local network access because the SSH session that started the managed server ended. Restart the managed server to restore it.'
+      text: 'Terminals on this Mac may have lost local network access because the SSH session that started this host’s Orca server ended. Restart Orca’s server to restore it.'
     })
   })
 
@@ -66,12 +80,12 @@ describe('SSH host server status line', () => {
     expect(
       sshHostServerStatusLine(plain, { managedServer: { kind: 'setting-up', phase: 'updating' } })
         ?.text
-    ).toBe('Updating managed server…')
+    ).toBe('Updating Orca on Box…')
     const managed = (update: SshManagedServerUpdateNote) =>
       sshHostServerStatusLine(plain, {
         managedServer: { kind: 'managed', environmentId: 'e', update }
       })
-    expect(managed({ state: 'host-newer' })?.text).toContain('from a newer Orca')
+    expect(managed({ state: 'host-newer' })?.text).toContain('newer version of Orca’s server')
     expect(managed({ state: 'deferred', detail: '2 terminals are running.' })).toMatchObject({
       tone: 'muted',
       detail: '2 terminals are running.'
@@ -117,22 +131,33 @@ describe('SSH host server status line', () => {
   })
 
   it('keeps durable reasons visible without a live state', () => {
-    expect(sshHostServerStatusLine({ orcadFence: { environmentId: 'e' } }, undefined)).toBeNull()
+    expect(
+      sshHostServerStatusLine({ label: 'Box', orcadFence: { environmentId: 'e' } }, undefined)
+    ).toBeNull()
     expect(
       sshHostServerStatusLine(
-        { orcadFence: { environmentId: 'e', sourceChangedAt: '2026-10-05T00:00:00Z' } },
+        {
+          label: 'Box',
+          orcadFence: { environmentId: 'e', sourceChangedAt: '2026-10-05T00:00:00Z' }
+        },
         { managedServer: { kind: 'managed', environmentId: 'e' } }
       )
     ).toMatchObject({ tone: 'warning' })
     expect(
       sshHostServerStatusLine(
-        { managedServerUnavailable: { reason: 'native_preflight', appVersion: '1.5.0' } },
+        {
+          label: 'Box',
+          managedServerUnavailable: { reason: 'native_preflight', appVersion: '1.5.0' }
+        },
         undefined
       )?.text
     ).toContain('missing system libraries')
     expect(
       sshHostServerStatusLine(
-        { managedServerUnavailable: { reason: 'future_reason', appVersion: '1.5.0' } },
+        {
+          label: 'Box',
+          managedServerUnavailable: { reason: 'future_reason', appVersion: '1.5.0' }
+        },
         undefined
       )
     ).toMatchObject({ text: expect.not.stringContaining('future_reason'), detail: 'future_reason' })
@@ -149,6 +174,15 @@ describe('SSH host server status line', () => {
     expect(line?.text).not.toContain('relay')
   })
 
+  it('tells a noexec host what to change, not to install an older Orca', () => {
+    const line = sshHostServerStatusLine(plain, {
+      managedServer: { kind: 'relay', reason: 'orcad_unavailable', detail: 'runtime_noexec' }
+    })
+    expect(line).toMatchObject({ tone: 'destructive', text: expect.stringContaining('noexec') })
+    expect(line?.text).toContain('connect again')
+    expect(line?.text).not.toContain('older version')
+  })
+
   it('says plainly when neither port forwarding nor the SSH session reaches the server', () => {
     const live = sshHostServerStatusLine(plain, {
       managedServer: {
@@ -158,7 +192,10 @@ describe('SSH host server status line', () => {
       }
     })
     const recorded = sshHostServerStatusLine(
-      { managedServerUnavailable: { reason: 'ssh_tunnel_unavailable', appVersion: '1.5.0' } },
+      {
+        label: 'Box',
+        managedServerUnavailable: { reason: 'ssh_tunnel_unavailable', appVersion: '1.5.0' }
+      },
       undefined
     )
     for (const line of [live, recorded]) {
@@ -221,6 +258,19 @@ describe('SSH host server status line', () => {
     })
   })
 
+  it('says contact was lost, not that the server failed, when setup lost the host', () => {
+    const line = sshHostServerStatusLine(plain, {
+      managedServer: {
+        kind: 'relay',
+        reason: 'failed',
+        contactLost: true,
+        detail: 'The SSH connection closed before the transfer finished'
+      }
+    })
+    expect(line).toMatchObject({ tone: 'warning', text: expect.stringContaining('lost contact') })
+    expect(line?.text).not.toContain('couldn’t start')
+  })
+
   it('says a move that stopped short is paused and kept, not a plain try-again', () => {
     const detail = 'Could not connect to the remote Orca runtime.'
     const state = {
@@ -236,7 +286,7 @@ describe('SSH host server status line', () => {
       text: expect.stringContaining('Nothing is lost'),
       detail
     })
-    expect(sshConnectFailureText(state, 'raw')).toContain('Settings > Managed servers')
+    expect(sshConnectFailureText(state, 'raw')).toContain('Settings > Orca on your SSH hosts')
   })
 
   it('puts an unserved host’s translated reason in the connect toast', () => {
@@ -249,7 +299,7 @@ describe('SSH host server status line', () => {
 
   it('says a host an older Orca changed is blocked until moved, not served by the relay', () => {
     const changed = sshHostServerStatusLine(
-      { orcadFence: { environmentId: 'e', sourceChangedAt: '2026-10-05T00:00:00Z' } },
+      { label: 'Box', orcadFence: { environmentId: 'e', sourceChangedAt: '2026-10-05T00:00:00Z' } },
       undefined
     )
     const unserved = sshConnectFailureText(

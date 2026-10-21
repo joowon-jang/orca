@@ -188,7 +188,7 @@ export abstract class OrcaRuntimeWithSplitPtyBackedTerminal extends OrcaRuntimeW
         }
       }
       try {
-        this.ptyController.retireRejectedPty?.(result.id, stopped)
+        this.ptyController.retireRejectedPty?.(result.id, stopped, result.incarnationId)
       } catch {
         // Best-effort cleanup; preserve the original split authority error.
       }

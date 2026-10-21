@@ -15,18 +15,14 @@ function isCi(env) {
  *
  * Off under CI, which packages from, caches, and verifies a project-local node_modules, unless
  * `ORCA_PNPM_FORCE_GLOBAL_VIRTUAL_STORE_IN_CI=1` (the dependency-isolation job).
- * Windows needs `ORCA_PNPM_GLOBAL_VIRTUAL_STORE=1` because its store links are true symlinks,
- * unverified for users without admin or Developer Mode; `=0` opts out anywhere else.
+ * On everywhere else, including Windows: without the symlink privilege pnpm links with
+ * junctions, which standard users can create. `ORCA_PNPM_GLOBAL_VIRTUAL_STORE=0` opts out.
  */
-function usesGlobalVirtualStore({ env = process.env, platform = process.platform } = {}) {
+function usesGlobalVirtualStore({ env = process.env } = {}) {
   if (isCi(env)) {
     return env[FORCE_IN_CI_ENV] === '1'
   }
-  const choice = env[GLOBAL_VIRTUAL_STORE_ENV]
-  if (choice === '0' || choice === '1') {
-    return choice === '1'
-  }
-  return platform !== 'win32'
+  return env[GLOBAL_VIRTUAL_STORE_ENV] !== '0'
 }
 
 module.exports = {

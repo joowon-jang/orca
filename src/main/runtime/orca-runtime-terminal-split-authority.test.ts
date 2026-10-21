@@ -6,6 +6,7 @@ import type { TerminalLayoutSnapshot } from '../../shared/terminal-tab-types'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import { makePaneKey } from '../../shared/stable-pane-id'
 import { OrcaRuntimeService } from './orca-runtime'
+import { ORCA_LAYOUT_OWNER_IS_MAIN } from '../../shared/layout-owner-switch'
 
 const REPO_ID = 'repo-1'
 const WORKTREE_ID = `${REPO_ID}::/workspace`
@@ -13,6 +14,7 @@ const TAB_ID = 'tab-remote'
 const SOURCE_LEAF_ID = '11111111-1111-4111-8111-111111111111'
 const SOURCE_PTY_ID = 'pty-source'
 const SPLIT_PTY_ID = 'pty-split'
+const SPLIT_INCARNATION_ID = 'pty-split-inc'
 
 function sourceLayout(): TerminalLayoutSnapshot {
   return {
@@ -109,11 +111,11 @@ function createHarness(
     },
     persistPtyBinding: () => true
   })
-  let resolveSpawn: ((result: { id: string }) => void) | undefined
+  let resolveSpawn: ((result: { id: string; incarnationId: string }) => void) | undefined
   const spawn = options.deferSpawn
     ? vi.fn(
         () =>
-          new Promise<{ id: string }>((resolve) => {
+          new Promise<{ id: string; incarnationId?: string }>((resolve) => {
             resolveSpawn = resolve
           })
       )
@@ -221,8 +223,11 @@ function createHarness(
         }
       }
     },
+    /** The split pane's terminal starting, as its window reports it. */
+    registerSplitPty: (leafId: string) =>
+      runtime.registerPty(SPLIT_PTY_ID, WORKTREE_ID, connectionId, { tabId: TAB_ID, leafId }),
     resolveReveal: () => resolveReveal?.({ tabId: TAB_ID }),
-    resolveSpawn: () => resolveSpawn?.({ id: SPLIT_PTY_ID })
+    resolveSpawn: () => resolveSpawn?.({ id: SPLIT_PTY_ID, incarnationId: SPLIT_INCARNATION_ID })
   }
 }
 
@@ -231,6 +236,8 @@ describe('remote runtime terminal split authority', () => {
     const harness = createHarness(true, { rendererMounted: true, graphOnlySource: true })
 
     const split = harness.runtime.splitTerminal(harness.handle, { direction: 'vertical' })
+    // A switch-on build tells the window once main has admitted the new pane.
+    await vi.waitFor(() => expect(harness.rendererSplitTerminal).toHaveBeenCalled())
 
     const newLeafId = harness.rendererSplitTerminal.mock.calls[0]?.[2]?.newLeafId
     expect(newLeafId).toEqual(expect.any(String))
@@ -245,6 +252,10 @@ describe('remote runtime terminal split authority', () => {
       telemetrySource: undefined,
       newLeafId
     })
+    // A switch-on build binds the new pane only once its terminal registered, before the graph.
+    if (ORCA_LAYOUT_OWNER_IS_MAIN) {
+      harness.registerSplitPty(newLeafId)
+    }
     harness.runtime.syncWindowGraph(1, {
       tabs: [
         {
@@ -461,7 +472,7 @@ describe('remote runtime terminal split authority', () => {
       expect.objectContaining({ deadlineMs: expect.any(Number) })
     )
     expect(harness.kill).not.toHaveBeenCalled()
-    expect(harness.retireRejectedPty).toHaveBeenCalledWith(SPLIT_PTY_ID, true)
+    expect(harness.retireRejectedPty).toHaveBeenCalledWith(SPLIT_PTY_ID, true, SPLIT_INCARNATION_ID)
   })
 
   it('refuses a split whose source is only projected, before spawning', async () => {
@@ -495,7 +506,11 @@ describe('remote runtime terminal split authority', () => {
 
     await expect(split).rejects.toThrow('terminal_split_source_not_found')
     expect(harness.kill).toHaveBeenCalledWith(SPLIT_PTY_ID)
-    expect(harness.retireRejectedPty).toHaveBeenCalledWith(SPLIT_PTY_ID, false)
+    expect(harness.retireRejectedPty).toHaveBeenCalledWith(
+      SPLIT_PTY_ID,
+      false,
+      SPLIT_INCARNATION_ID
+    )
     expect(harness.getSession().terminalLayoutsByTabId[TAB_ID]?.root).toEqual({
       type: 'leaf',
       leafId: SOURCE_LEAF_ID

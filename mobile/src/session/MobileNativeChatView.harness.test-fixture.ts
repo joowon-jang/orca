@@ -75,7 +75,8 @@ export function installChatViewHooks(): void {
     renderer = null
     scrollToEnd.mockReset()
     scrollToOffset.mockReset()
-    pageScroller.scrollHeight = 0
+    Object.assign(pageScroller, { scrollTop: 0, scrollHeight: 0, clientHeight: 500 })
+    pageScroller.style.overflowAnchor = ''
     vi.unstubAllGlobals()
   })
 }
@@ -139,6 +140,17 @@ export async function pressSend(): Promise<void> {
   await act(async () => {
     await composer.props.onPress()
   })
+}
+
+/** What the list reports from a scroll, drag or momentum event, in a 500-tall viewport. */
+export function scrollEvent(y: number, contentHeight: number) {
+  return {
+    nativeEvent: {
+      contentOffset: { y },
+      contentSize: { height: contentHeight },
+      layoutMeasurement: { height: 500 }
+    }
+  }
 }
 
 export async function scrollAwayFromTail(): Promise<void> {

@@ -9,8 +9,9 @@ import { useWorkspaceSections } from '../worktree/use-workspace-sections'
 import { buildFilterRepos, type WorkspaceSectionRepo } from '../worktree/workspace-filter-repos'
 import type { Section, SectionRepo, Worktree } from '../worktree/workspace-list-types'
 import { rowFiltersForView } from '../worktree/workspace-view-settings'
-import { buildHostFeedCatalog, buildHostFeedView } from './host-sidebar-feed-inputs'
-import { buildHostFeedSections } from './host-sidebar-feed-sections'
+import { buildSidebarFeedCatalog } from '../../../src/shared/sidebar-list/sidebar-feed-catalog'
+import { buildHostFeedView } from './host-sidebar-feed-inputs'
+import { buildHostFeedSections, buildPreFeedSections } from './host-sidebar-feed-sections'
 import { useHostRepoIconDataUrls } from './use-host-repo-icon-data-urls'
 import type { HostSidebarFeed } from './use-host-sidebar-feed'
 import type { HostScreenState } from './use-host-screen-state'
@@ -21,6 +22,8 @@ export type HostListSectionsInputs = {
   feed: HostSidebarFeed | null
   /** The rows worktree.ps and the desktop's server lists served, with display state applied. */
   displayWorktrees: Worktree[]
+  /** The desktop's platform, which names its own host; never the phone's. */
+  hostPlatform: NodeJS.Platform | null
   state: HostScreenState
 }
 
@@ -41,10 +44,9 @@ function useCollapsedGroups(state: HostScreenState): Set<string> {
 }
 
 function useFilterRepos(
-  state: HostScreenState,
+  catalogRepos: readonly SectionRepo[],
   displayWorktrees: Worktree[]
 ): WorkspaceSectionRepo[] {
-  const catalogRepos = state.servedProjectSections?.repos ?? state.desktopRepos
   return useMemo(
     () => buildFilterRepos(catalogRepos, displayWorktrees),
     [catalogRepos, displayWorktrees]
@@ -97,21 +99,18 @@ function useFeedHostListSections({
   client,
   feed,
   displayWorktrees,
+  hostPlatform,
   state
 }: HostListSectionsInputs): HostListSections {
   const collapsedGroups = useCollapsedGroups(state)
-  const uniqueRepos = useFilterRepos(state, displayWorktrees)
-  const projectOrderBy =
-    state.view.projectOrderBy ?? state.servedProjectSections?.projectOrderBy ?? 'manual'
   const domains = feed?.kind === 'ready' ? feed.domains : null
+  // The catalog installed with the rows; a desktop that predates it answers mobileRelay.projectSections.
+  const served = domains?.projectCatalog ?? state.servedProjectSections
+  const uniqueRepos = useFilterRepos(served?.repos ?? state.desktopRepos, displayWorktrees)
+  const projectOrderBy = state.view.projectOrderBy ?? served?.projectOrderBy ?? 'manual'
   const catalog = useMemo(
-    () =>
-      buildHostFeedCatalog(
-        state.servedProjectSections,
-        state.desktopRepos,
-        state.hostProjectGroups
-      ),
-    [state.servedProjectSections, state.desktopRepos, state.hostProjectGroups]
+    () => buildSidebarFeedCatalog(served, state.desktopRepos, state.hostProjectGroups),
+    [served, state.desktopRepos, state.hostProjectGroups]
   )
   const view = useMemo(
     () =>
@@ -119,14 +118,15 @@ function useFeedHostListSections({
         view: state.view,
         projectOrderBy,
         desktop: domains?.desktop ?? null,
-        hostPlatform: state.hostPlatform
+        hostPlatform
       }),
-    [state.view, projectOrderBy, domains, state.hostPlatform]
+    [state.view, projectOrderBy, domains, hostPlatform]
   )
   const built = useMemo(
     () => (domains ? buildSidebarFeedRows(domains, catalog, view) : null),
     [domains, catalog, view]
   )
+  const loading = feed?.kind === 'loading'
   const sections = useMemo(
     () =>
       built
@@ -137,8 +137,15 @@ function useFeedHostListSections({
             repoHostIdByRepoId: state.repoHostIdByRepoId,
             search: state.search
           })
-        : NO_SECTIONS,
-    [built, displayWorktrees, state.repoHostIdByRepoId, state.search]
+        : loading
+          ? buildPreFeedSections({
+              rows: displayWorktrees,
+              view: state.view,
+              search: state.search,
+              repoHostIdByRepoId: state.repoHostIdByRepoId
+            })
+          : NO_SECTIONS,
+    [built, loading, displayWorktrees, state.view, state.repoHostIdByRepoId, state.search]
   )
 
   const iconIds = useMemo(() => [...new Set(domains?.repoIcons.values() ?? [])], [domains])
@@ -148,7 +155,7 @@ function useFeedHostListSections({
     const hostIcons = new Map(
       state.desktopRepos.map((repo) => [repoIconFeedKey(repo), repo.repoIcon])
     )
-    const repos = state.servedProjectSections?.repos ?? state.desktopRepos
+    const repos = served?.repos ?? state.desktopRepos
     return new Map(
       repos.map((repo) => {
         const key = repoIconFeedKey(repo)
@@ -160,7 +167,7 @@ function useFeedHostListSections({
         return [repo.id, { ...repo, repoIcon }]
       })
     )
-  }, [state.servedProjectSections, state.desktopRepos, domains, iconDataUrls])
+  }, [served, state.desktopRepos, domains, iconDataUrls])
 
   return { sections, rawSections: sections, uniqueRepos, repoById, collapsedGroups, projectOrderBy }
 }

@@ -22,7 +22,6 @@ vi.mock('@/lib/connection-owner-resolution', async (importOriginal) => ({
 }))
 vi.mock('@/lib/worktree-runtime-owner', async (importOriginal) => ({
   ...(await importOriginal<typeof WorktreeRuntimeOwnerModule>()),
-  getRuntimeEnvironmentIdForWorktree: () => 'env-1',
   runtimeEnvironmentIdWithLegacyFallbackUnlessTwin: () => 'env-1'
 }))
 

@@ -3,6 +3,7 @@ import type { Repo } from '../../../../shared/repo-types'
 import {
   getRepoExecutionHostId,
   getSettingsFocusedExecutionHostId,
+  normalizeHostPart,
   type ExecutionHostId
 } from '../../../../shared/execution-host'
 import {
@@ -16,6 +17,14 @@ type RepoIdentityParts = Pick<Repo, 'id' | 'connectionId' | 'executionHostId'>
 
 export function getRepoHostIdentity(repo: RepoIdentityParts): HostScopedRepoKey {
   return getRepoHostIdentityForParts(repo.id, getRepoExecutionHostId(repo))
+}
+
+/** One exact row: a paired server's twins share its `runtime:` host and differ by nested SSH target. */
+export function isSameRepoRow(left: RepoIdentityParts, right: RepoIdentityParts): boolean {
+  return (
+    getRepoHostIdentity(left) === getRepoHostIdentity(right) &&
+    normalizeHostPart(left.connectionId) === normalizeHostPart(right.connectionId)
+  )
 }
 
 export function repoMatchesHostIdentity(

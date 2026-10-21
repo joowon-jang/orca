@@ -11,6 +11,11 @@ import { isWindowsAbsolutePathLike } from '../../../../shared/cross-platform-pat
 import type { ProcessedAgentStatusChunk } from '../../../../shared/agent-status-osc'
 import { mapExplicitAgentStateToRuntimeTerminalStatus } from '../../runtime-worktree-status-projection'
 import type { RuntimeTerminalAgentStatusEvent } from '../../runtime-terminal-contracts'
+import { programStatusStateOutlivesProgram } from '../../../../shared/program-status/protocol'
+import type { ParsedAgentStatusPayload } from '../../../../shared/agent-status-types'
+
+// Why: programs report only changes, so a long `working` renews its row inside AGENT_STATUS_STALE_AFTER_MS.
+const PROGRAM_STATUS_LEASE_RENEWAL_MS = 10 * 60 * 1000
 
 type TerminalAgentStatusTarget = Pick<
   RuntimeTerminalAgentStatusEvent,
@@ -19,6 +24,10 @@ type TerminalAgentStatusTarget = Pick<
 
 export abstract class OrcaRuntimeWithCreateTerminalSideEffectCommandCodeDetector extends OrcaRuntimeWithApplyTrackedPtyTitle {
   abstract getAgentStatusTerminalHandleForPaneKey(paneKey: string): string | undefined
+
+  /** Each live OSC 7501 program's latest row payload; renewed while its PTY keeps a live facet. */
+  private readonly liveProgramStatusPayloadByPtyId = new Map<string, ParsedAgentStatusPayload>()
+  private programStatusLeaseTimer: ReturnType<typeof setInterval> | null = null
 
   protected createTerminalSideEffectCommandCodeDetector(
     ptyId: string
@@ -95,13 +104,41 @@ export abstract class OrcaRuntimeWithCreateTerminalSideEffectCommandCodeDetector
   protected emitTerminalAgentStatusEvents(
     ptyId: string,
     chunk: Pick<ProcessedAgentStatusChunk, 'payloads'> & Partial<ProcessedAgentStatusChunk>,
-    provenance?: { origin: 'process'; yieldsToHookSince: number }
+    provenance?:
+      | { origin: 'process'; yieldsToHookSince: number }
+      | { renewsProgramStatusLease: true }
   ): void {
-    if (chunk.payloads.length === 0) {
+    const facet = chunk.programStatusFacet
+    if (chunk.payloads.length === 0 && facet === undefined) {
       return
     }
+    if (facet !== undefined) {
+      if (facet && !programStatusStateOutlivesProgram(facet.state)) {
+        this.liveProgramStatusFacetPtyIds.add(ptyId)
+      } else {
+        this.liveProgramStatusFacetPtyIds.delete(ptyId)
+      }
+    }
     const targets = this.resolveTerminalAgentStatusTargets(ptyId)
+    // Why before the payloads: each row this chunk publishes must already carry the program's
+    // latest report, or a reader acting between the two (the 133;D drop) sees a stale facet.
+    if (facet !== undefined && this.onTerminalProgramStatusFacet) {
+      for (const target of targets) {
+        try {
+          this.onTerminalProgramStatusFacet({ ptyId, paneKey: target.paneKey, facet })
+        } catch (err) {
+          console.error('[runtime] terminal program status listener threw', {
+            ptyId,
+            paneKey: target.paneKey,
+            err
+          })
+        }
+      }
+    }
     for (const payload of chunk.payloads) {
+      if (chunk.programStatusPayloads?.has(payload)) {
+        this.trackProgramStatusLease(ptyId, payload)
+      }
       // Why not gated on a listener: the prompt lifecycle is main's own state, read by
       // terminal waits that run with no status consumer attached.
       this.recordAgentPromptLifecycleState(
@@ -117,7 +154,11 @@ export abstract class OrcaRuntimeWithCreateTerminalSideEffectCommandCodeDetector
             ptyId,
             ...target,
             payload,
-            ...provenance
+            ...provenance,
+            ...(chunk.programStatusPayloads?.has(payload) ? { fromProgramStatus: true } : {}),
+            ...(chunk.programStatusRowRemovals?.has(payload)
+              ? { removesProgramStatusRow: true }
+              : {})
           })
         } catch (err) {
           console.error('[runtime] terminal agent status listener threw', {
@@ -129,6 +170,57 @@ export abstract class OrcaRuntimeWithCreateTerminalSideEffectCommandCodeDetector
           })
         }
       }
+    }
+  }
+
+  private trackProgramStatusLease(ptyId: string, payload: ParsedAgentStatusPayload): void {
+    if (payload.state === 'done') {
+      this.liveProgramStatusPayloadByPtyId.delete(ptyId)
+      return
+    }
+    this.liveProgramStatusPayloadByPtyId.set(ptyId, payload)
+    if (this.programStatusLeaseTimer === null) {
+      this.programStatusLeaseTimer = setInterval(
+        () => this.renewProgramStatusLeases(),
+        PROGRAM_STATUS_LEASE_RENEWAL_MS
+      )
+      this.programStatusLeaseTimer.unref?.()
+    }
+  }
+
+  private renewProgramStatusLeases(): void {
+    for (const [ptyId, payload] of this.liveProgramStatusPayloadByPtyId) {
+      // The live facet set is the authority on whether the program still runs.
+      if (!this.liveProgramStatusFacetPtyIds.has(ptyId) || !this.ptysById.has(ptyId)) {
+        this.liveProgramStatusPayloadByPtyId.delete(ptyId)
+        continue
+      }
+      this.emitTerminalAgentStatusEvents(
+        ptyId,
+        { payloads: [payload], programStatusPayloads: new Set([payload]) },
+        { renewsProgramStatusLease: true }
+      )
+    }
+    if (this.liveProgramStatusPayloadByPtyId.size === 0 && this.programStatusLeaseTimer) {
+      clearInterval(this.programStatusLeaseTimer)
+      this.programStatusLeaseTimer = null
+    }
+  }
+
+  override notePtyDataGap(ptyId: string, droppedChars = 0): void {
+    super.notePtyDataGap(ptyId, droppedChars)
+    // The gap may hold the program's end, and the fresh parser no longer knows its records.
+    const entry = this.ptyTitleTrackersByPtyId.get(ptyId)
+    if (entry && entry.programActivity !== null) {
+      entry.tracker.endProgramActivity()
+    }
+    this.clearLiveProgramStatusFacet(ptyId)
+  }
+
+  /** The PTY's program ended: drop its live facet (done/error stay). Call while its panes resolve. */
+  protected clearLiveProgramStatusFacet(ptyId: string): void {
+    if (this.liveProgramStatusFacetPtyIds.has(ptyId)) {
+      this.emitTerminalAgentStatusEvents(ptyId, { payloads: [], programStatusFacet: null })
     }
   }
 

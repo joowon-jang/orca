@@ -7,9 +7,9 @@ import {
 import { getRepoExecutionHostId, type ExecutionHostId } from '../../shared/execution-host'
 import {
   readAllWorktreeMetaForHost,
-  readWorktreeMetaForHost,
-  writeWorktreeMetaForHost
+  readWorktreeMetaForHost
 } from '../persistence/host-qualified-worktree-meta'
+import { hostWorktreeTarget } from '../../shared/worktree/host-qualified-identity'
 import { isFolderRepo } from '../../shared/repo-kind'
 import {
   getConnectedWorktreeLineageIds,
@@ -41,11 +41,9 @@ type RepoWorktreeRowStore = Pick<
   | 'getWorktreeMeta'
   | 'getWorktreeMetaForHost'
   | 'setWorktreeMeta'
-  | 'setWorktreeMetaForHost'
   | 'getAllWorktreeLineage'
   | 'getAllWorkspaceLineage'
   | 'removeWorktreeLineage'
-  | 'removeWorkspaceLineage'
 >
 
 /**
@@ -172,7 +170,7 @@ export async function resolveRepoWorktreeRows(
     const meta = ownedExistingMeta?.instanceId
       ? ownedExistingMeta
       : ownedExistingMeta || (!existingMeta && repoOwnerCount === 1)
-        ? writeWorktreeMetaForHost(store, worktreeId, expectedHostId, {})
+        ? store.setWorktreeMeta(hostWorktreeTarget({ id: worktreeId, hostId: expectedHostId }), {})
         : undefined
     const merged = {
       ...mergeWorktree(repo.id, gitWorktree, meta, repo.displayName),

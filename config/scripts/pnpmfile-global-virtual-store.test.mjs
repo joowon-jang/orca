@@ -11,26 +11,23 @@ const {
 
 describe('usesGlobalVirtualStore', () => {
   const cases = [
-    // [env, platform, expected]
-    [{}, 'darwin', true],
-    [{}, 'linux', true],
-    [{}, 'win32', false],
-    [{ [STORE_ENV]: '1' }, 'win32', true],
-    [{ [STORE_ENV]: '0' }, 'win32', false],
-    [{ [STORE_ENV]: '0' }, 'darwin', false],
-    [{ [STORE_ENV]: 'yes' }, 'linux', true],
-    [{ CI: 'true' }, 'darwin', false],
-    [{ CI: '1' }, 'linux', false],
-    [{ GITHUB_ACTIONS: 'true' }, 'linux', false],
-    [{ CI: 'true', [STORE_ENV]: '1' }, 'win32', false],
-    [{ CI: 'true', [FORCE_IN_CI_ENV]: '1' }, 'linux', true],
-    [{ GITHUB_ACTIONS: 'true', [FORCE_IN_CI_ENV]: '1' }, 'win32', true],
-    [{ [FORCE_IN_CI_ENV]: '1', [STORE_ENV]: '0' }, 'darwin', false],
-    [{ CI: 'false' }, 'darwin', true],
-    [{ CI: '0' }, 'linux', true]
+    // [env, expected]; platform-independent, so Windows standard users get it too.
+    [{}, true],
+    [{ [STORE_ENV]: '1' }, true],
+    [{ [STORE_ENV]: '0' }, false],
+    [{ [STORE_ENV]: 'yes' }, true],
+    [{ CI: 'true' }, false],
+    [{ CI: '1' }, false],
+    [{ GITHUB_ACTIONS: 'true' }, false],
+    [{ CI: 'true', [STORE_ENV]: '1' }, false],
+    [{ CI: 'true', [FORCE_IN_CI_ENV]: '1' }, true],
+    [{ GITHUB_ACTIONS: 'true', [FORCE_IN_CI_ENV]: '1' }, true],
+    [{ [FORCE_IN_CI_ENV]: '1', [STORE_ENV]: '0' }, false],
+    [{ CI: 'false' }, true],
+    [{ CI: '0' }, true]
   ]
-  it.each(cases)('env %j on %s -> %s', (env, platform, expected) => {
-    expect(usesGlobalVirtualStore({ env, platform })).toBe(expected)
+  it.each(cases)('env %j -> %s', (env, expected) => {
+    expect(usesGlobalVirtualStore({ env })).toBe(expected)
   })
 })
 

@@ -26,14 +26,18 @@ export function selectNativeChatRuntimeEnvironmentId(
   state: NativeChatRuntimeOwnerState,
   terminalTabId: string
 ): string | null {
-  const worktreeId = findTerminalTabWorktreeId(state.tabsByWorktree, terminalTabId)
-  return worktreeId ? runtimeEnvironmentIdWithLegacyFallbackUnlessTwin(state, worktreeId) : null
+  return runtimeEnvironmentIdWithLegacyFallbackUnlessTwin(
+    state,
+    findTerminalTabWorktreeId(state.tabsByWorktree, terminalTabId)
+  )
 }
 
 export function createNativeChatRuntimeSelector(terminalTabId: string) {
   const selectOwner = createNativeChatTabOwnerSelector(terminalTabId)
   return (state: NativeChatRuntimeOwnerState): string | null => {
-    const worktreeId = selectOwner({ tabsByWorktree: state.tabsByWorktree })
-    return worktreeId ? runtimeEnvironmentIdWithLegacyFallbackUnlessTwin(state, worktreeId) : null
+    return runtimeEnvironmentIdWithLegacyFallbackUnlessTwin(
+      state,
+      selectOwner({ tabsByWorktree: state.tabsByWorktree })
+    )
   }
 }

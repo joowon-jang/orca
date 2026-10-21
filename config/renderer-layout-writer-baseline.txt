@@ -45,7 +45,6 @@
 2 src/renderer/src/runtime/web-session-tabs-sync/apply-preparation-groups.ts
 5 src/renderer/src/runtime/web-session-tabs-sync/apply-terminal-records.ts
 4 src/renderer/src/runtime/web-session-tabs-sync/apply-worktree-records.ts
-1 src/renderer/src/runtime/web-session-tabs-sync/mirrored-editor-file-identity.ts
 2 src/renderer/src/runtime/web-session-tabs-sync/session-tabs-inventory-absence.ts
 1 src/renderer/src/runtime/web-session-terminal-orphan-recovery-surface.ts
 2 src/renderer/src/runtime/web-session-terminal-orphan-topology.ts
@@ -88,7 +87,7 @@
 23 src/renderer/src/store/slices/tabs/tabs-drag-preview-actions.ts
 11 src/renderer/src/store/slices/tabs/tabs-drop-actions.ts
 4 src/renderer/src/store/slices/tabs/tabs-focus-actions.ts
-13 src/renderer/src/store/slices/tabs/tabs-group-actions.ts
+12 src/renderer/src/store/slices/tabs/tabs-group-actions.ts
 1 src/renderer/src/store/slices/tabs/tabs-host-mirroring.ts
 8 src/renderer/src/store/slices/tabs/tabs-label-actions.ts
 10 src/renderer/src/store/slices/tabs/tabs-move-actions.ts

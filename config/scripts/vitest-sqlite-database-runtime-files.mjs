@@ -1,5 +1,7 @@
 // Database opening and lifecycle fixtures exercise Node SQLite behavior.
 export const SQLITE_DATABASE_RUNTIME_INCLUDE = [
+  'src/main/ai-vault-search/session-search-write-buffer.test.ts',
+  'src/main/ai-vault/session-document-consumer-replacement.test.ts',
   'src/main/ai-vault-search/session-search-dependent-transcripts.test.ts',
   'src/main/ai-vault-search/session-search-file-write.test.ts',
   'src/main/ai-vault-search/session-search-live-transcript.test.ts',
@@ -188,7 +190,6 @@ export const SQLITE_DATABASE_RUNTIME_INCLUDE = [
   'src/main/runtime/structured-agent-session-codex-held-sends.test.ts',
   'src/main/runtime/structured-agent-session-codex-stopped-send-order.test.ts',
   'src/main/runtime/structured-agent-session-codex-turn-end-settlement.test.ts',
-  'src/main/runtime/structured-agent-session-failure-logging.test.ts',
   'src/main/runtime/structured-agent-session-held-signal.test.ts',
   'src/main/runtime/structured-agent-session-host-refusal.test.ts',
   'src/main/runtime/structured-agent-session-install-failure.test.ts',

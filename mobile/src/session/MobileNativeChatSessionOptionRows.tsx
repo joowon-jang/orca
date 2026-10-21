@@ -2,7 +2,7 @@
 // beside it so the card file stays about layout and apply wiring.
 
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native'
-import { Check, ChevronRight, ShieldAlert } from 'lucide-react-native'
+import { Check, ChevronRight, ShieldAlert, type LucideIcon } from 'lucide-react-native'
 import { colors, radii, spacing, typography } from '../theme/mobile-theme'
 import {
   sessionOptionValueMarker,
@@ -21,6 +21,7 @@ export function ModelPill({
   primary,
   secondary,
   warning,
+  icon: Icon,
   accessibleName,
   disabled,
   onPress
@@ -28,10 +29,12 @@ export function ModelPill({
   primary: string
   secondary: string | null
   warning: boolean
+  icon?: LucideIcon
   accessibleName: string
   disabled: boolean
   onPress: () => void
 }): React.JSX.Element {
+  const PillIcon = Icon ?? (warning ? ShieldAlert : undefined)
   return (
     <Pressable
       accessibilityLabel={accessibleName}
@@ -42,11 +45,19 @@ export function ModelPill({
       disabled={disabled}
       hitSlop={6}
     >
-      {warning ? <ShieldAlert size={15} color={colors.statusAmber} strokeWidth={2.2} /> : null}
-      <Text style={styles.pillText} numberOfLines={1} ellipsizeMode="tail">
-        <Text style={[styles.pillPrimary, disabled && styles.pillTextDisabled]}>{primary}</Text>
-        {secondary ? <Text style={styles.pillSecondary}>{`  ${secondary}`}</Text> : null}
-      </Text>
+      {PillIcon ? (
+        <PillIcon
+          size={15}
+          color={warning ? colors.statusAmber : disabled ? colors.textMuted : colors.textSecondary}
+          strokeWidth={2.2}
+        />
+      ) : null}
+      {!Icon ? (
+        <Text style={styles.pillText} numberOfLines={1} ellipsizeMode="tail">
+          <Text style={[styles.pillPrimary, disabled && styles.pillTextDisabled]}>{primary}</Text>
+          {secondary ? <Text style={styles.pillSecondary}>{`  ${secondary}`}</Text> : null}
+        </Text>
+      ) : null}
     </Pressable>
   )
 }

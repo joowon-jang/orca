@@ -13,13 +13,16 @@ import type { SshConnectionStatus } from '../../../../shared/ssh-types'
 import { translate } from '@/i18n/i18n'
 import { getHostDisplayLabelOverrides } from '../../../../shared/host-setting-overrides'
 import {
-  isRuntimeOwnedSshTargetId,
+  isOwnedSshTargetId,
   toRuntimeExecutionHostId,
   toSshExecutionHostId
 } from '../../../../shared/execution-host'
 import { buildExecutionHostRegistry } from '../../../../shared/execution-host-registry'
 import { pickerExecutionHosts } from '../../../../shared/managed-orcad-execution-host'
-import { isListedRemoteServer } from '../../../../shared/runtime-environments'
+import {
+  isListedRemoteServer,
+  runtimePairingRepairRoute
+} from '../../../../shared/runtime-environments'
 import { RuntimeHostStatusRow } from './RuntimeHostStatusRow'
 import { connectedHostCountLabel, connectingHostsLabel } from './ssh-status-segment-copy'
 import { SshTargetStatusRow } from './SshTargetStatusRow'
@@ -79,7 +82,7 @@ export function SshStatusSegment({
   const targets = Array.from(sshTargetLabels.entries())
     // Why: runtime-owned (per-workspace-env) SSH targets are hidden — never list them
     // as a user-facing SSH host in the status bar.
-    .filter(([id]) => !isRuntimeOwnedSshTargetId(id) && visibleHosts.has(toSshExecutionHostId(id)))
+    .filter(([id]) => !isOwnedSshTargetId(id) && visibleHosts.has(toSshExecutionHostId(id)))
     .map(([id, label]) => {
       const state = sshConnectionStates.get(id)
       return {
@@ -96,14 +99,15 @@ export function SshStatusSegment({
       // Why the registry's verdict: it is the same blocked reason the sidebar and Settings show.
       const blockedReason =
         registryHost?.health === 'blocked' ? registryHost.blockedReason : undefined
+      const repairRoute = runtimePairingRepairRoute(environment)
       return {
         id: environment.id,
         label: registryHost?.label || environment.name || environment.id,
         blockedReason,
         blocked: blockedReason
           ? {
-              ...runtimeHostBlockedCopy(blockedReason, registryHost?.compatibility),
-              canRepair: blockedReason === 'access-revoked'
+              ...runtimeHostBlockedCopy(blockedReason, registryHost?.compatibility, repairRoute),
+              canRepair: blockedReason === 'access-revoked' && repairRoute === 'access-link'
             }
           : null,
         snapshot: statusEntry?.snapshot,

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Dialog,
@@ -35,6 +36,7 @@ export function ConfirmationDialogProvider({
   const confirmButtonRef = useRef<HTMLButtonElement>(null)
   const [queue, setQueue] = useState<ConfirmationDialogRequest[]>([])
   const [dontAskAgain, setDontAskAgain] = useState(false)
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
   const activeRequest = queue[0] ?? null
   const activeRequestRef = useRef<ConfirmationDialogRequest | null>(activeRequest)
   const setContextualToursBlockingSurfaceVisible = useAppStore(
@@ -61,12 +63,31 @@ export function ConfirmationDialogProvider({
 
   const confirm = useCallback<ConfirmationDialogContextValue>((options) => {
     return new Promise((resolve) => {
+      const { signal } = options
+      if (signal?.aborted) {
+        resolve(false)
+        return
+      }
       const request: ConfirmationDialogRequest = {
         id: nextIdRef.current,
         options,
         resolve
       }
       nextIdRef.current += 1
+      signal?.addEventListener(
+        'abort',
+        () => {
+          if (activeRequestRef.current?.id === request.id) {
+            setDontAskAgain(false)
+            setFieldValues({})
+          }
+          resolve(false)
+          setQueue((currentQueue) =>
+            currentQueue.filter((queuedRequest) => queuedRequest.id !== request.id)
+          )
+        },
+        { once: true }
+      )
       setQueue((currentQueue) => [...currentQueue, request])
     })
   }, [])
@@ -81,8 +102,12 @@ export function ConfirmationDialogProvider({
       if (confirmed && dontAskAgain) {
         request.options.dontAskAgain?.onConfirmed()
       }
-      // Why: queued prompts must not inherit this request's preference.
+      if (confirmed) {
+        request.options.fields?.onConfirmed(fieldValues)
+      }
+      // Why: queued prompts must not inherit this request's preference or typed values.
       setDontAskAgain(false)
+      setFieldValues({})
       request.resolve(confirmed)
       setQueue((currentQueue) => {
         if (currentQueue[0]?.id === request.id) {
@@ -91,7 +116,7 @@ export function ConfirmationDialogProvider({
         return currentQueue.filter((queuedRequest) => queuedRequest.id !== request.id)
       })
     },
-    [dontAskAgain]
+    [dontAskAgain, fieldValues]
   )
 
   return (
@@ -141,6 +166,31 @@ export function ConfirmationDialogProvider({
               ) : null}
             </DialogHeader>
           </div>
+          {displayedRequest?.options.fields ? (
+            <div className="space-y-3">
+              {displayedRequest.options.fields.inputs.map((field) => (
+                <div key={field.id} className="space-y-2">
+                  <Label htmlFor={`confirmation-dialog-field-${field.id}`}>{field.label}</Label>
+                  <Input
+                    id={`confirmation-dialog-field-${field.id}`}
+                    type={field.type ?? 'text'}
+                    autoComplete={field.autoComplete}
+                    value={fieldValues[field.id] ?? ''}
+                    onChange={(event) => {
+                      const { value } = event.target
+                      setFieldValues((current) => ({ ...current, [field.id]: value }))
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        settleActiveRequest(true)
+                      }
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : null}
           {displayedRequest?.options.dontAskAgain ? (
             <div className="flex items-center gap-2">
               <Checkbox

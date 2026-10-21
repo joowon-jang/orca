@@ -35,7 +35,6 @@ vi.mock('@/store', async () => {
   }
 })
 vi.mock('@/lib/worktree-runtime-owner', () => ({
-  getRuntimeEnvironmentIdForWorktree: () => null,
   runtimeEnvironmentIdWithLegacyFallbackUnlessTwin: () => null,
   getExecutionHostIdForWorktree: () => mocks.executionHostId
 }))

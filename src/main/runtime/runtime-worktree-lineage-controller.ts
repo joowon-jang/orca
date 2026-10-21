@@ -9,6 +9,7 @@ import {
 import { sharesResolvedWorktreeLineageBoundary } from '../../shared/resolved-worktree-lineage'
 import type { OrchestrationDb } from './orchestration/db'
 import type { RuntimeStore } from './runtime-store-contract'
+import { worktreeRowTarget } from '../persistence/host-qualified-worktree-meta'
 import type { ResolvedWorktree } from './runtime-worktree-path-identity'
 import { isWslMoveWorktreeBlocked } from '../persistence/moving-wsl-projects/wsl-move-background-backoff'
 import {
@@ -182,7 +183,11 @@ export class RuntimeWorktreeLineageController {
       } catch {
         continue
       }
-      store.setWorktreeLineage(worktree.id, {
+      const target = worktreeRowTarget(store, worktree)
+      if (!target) {
+        continue
+      }
+      store.setWorktreeLineage(target, {
         worktreeId: worktree.id,
         worktreeInstanceId: worktree.instanceId,
         parentWorktreeId: candidate.parent.worktree.id,

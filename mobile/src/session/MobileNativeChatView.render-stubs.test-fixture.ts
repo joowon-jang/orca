@@ -3,7 +3,29 @@ import { vi } from 'vitest'
 const scrollToEnd = vi.hoisted(() => vi.fn())
 const scrollToOffset = vi.hoisted(() => vi.fn())
 const platform = vi.hoisted(() => ({ OS: 'ios' }))
-const pageScroller = vi.hoisted(() => ({ scrollHeight: 0 }))
+// The page list's live DOM geometry.
+const pageScroller = vi.hoisted(() => {
+  const listeners = new Map<string, Set<(event?: unknown) => void>>()
+  return {
+    scrollTop: 0,
+    scrollHeight: 0,
+    clientHeight: 500,
+    clientWidth: 320,
+    style: { overflowAnchor: '' },
+    getInnerViewNode: () => ({}),
+    getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
+    addEventListener: (type: string, listener: (event?: unknown) => void) => {
+      listeners.set(type, (listeners.get(type) ?? new Set()).add(listener))
+    },
+    removeEventListener: (type: string, listener: (event?: unknown) => void) => {
+      listeners.get(type)?.delete(listener)
+    },
+    // The browser's scroll event at the scroller's current position.
+    scroll: () => listeners.get('scroll')?.forEach((listener) => listener()),
+    // The reader's hand on the scroller, e.g. a wheel turn.
+    input: (type: string) => listeners.get(type)?.forEach((listener) => listener())
+  }
+})
 
 export async function reactNativeStub() {
   const React = await import('react')
@@ -16,6 +38,17 @@ export async function reactNativeStub() {
     }),
     Platform: platform,
     Pressable: 'Pressable',
+    // The page's list scrolls through it.
+    ScrollView: React.forwardRef((props, ref) => {
+      const handle = {
+        scrollTo: ({ y, animated }: { y: number; animated: boolean }) =>
+          scrollToOffset({ animated, offset: y }),
+        scrollToEnd,
+        getScrollableNode: () => pageScroller
+      }
+      React.useImperativeHandle(ref, () => handle, [])
+      return React.createElement('ScrollView', props)
+    }),
     StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
     Text: 'Text',
     View: 'View'

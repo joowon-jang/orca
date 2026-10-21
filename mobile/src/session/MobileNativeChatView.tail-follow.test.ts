@@ -6,6 +6,7 @@ import {
   list,
   pressSend,
   render,
+  renderedRow,
   root,
   scrollAwayFromTail,
   scrollToEnd,
@@ -333,6 +334,21 @@ describe('MobileNativeChatView: tail-follow', () => {
     act(() => list().props.onContentSizeChange(320, 900))
     expect(scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 900 })
     expect(control('Collapse tool runs')).toHaveLength(1)
+  })
+
+  it('starts an initially empty switched-to native chat following, preserving Tools', async () => {
+    const toolTurn = (id: string): ReturnType<typeof assistantTurn> => ({
+      ...assistantTurn(id, ''),
+      blocks: [{ type: 'tool-call', name: 'Bash', callId: id, input: { command: 'ls' } }]
+    })
+    await render({ folded: [toolTurn('a')] })
+    act(() => root().findAllByProps({ accessibilityLabel: 'Expand tool runs' })[0].props.onPress())
+    await scrollAwayFromTail()
+    await update({ sendSurfaceId: 'tab-b', folded: [] })
+    await update({ sendSurfaceId: 'tab-b', folded: [toolTurn('b')] })
+    act(() => list().props.onContentSizeChange(320, 1300))
+    expect(scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 1300 })
+    expect(renderedRow('b').props.toolsExpanded).toBe(true)
   })
 
   it('repins after a keyboard-driven viewport layout only while following', async () => {

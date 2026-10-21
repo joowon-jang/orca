@@ -130,7 +130,8 @@ export type RuntimePtyController = {
    *  False on doubt (absent session, SSH-scoped id, non-daemon provider). */
   attach?(ptyId: string): Promise<boolean>
   kill(ptyId: string): boolean
-  retireRejectedPty?(ptyId: string, stopConfirmed: boolean): void
+  /** `incarnationId` is the rejected spawn's; a same-id respawn since then is left alone. */
+  retireRejectedPty?(ptyId: string, stopConfirmed: boolean, incarnationId: string | undefined): void
   stopAndWait?(
     ptyId: string,
     opts?: { keepHistory?: boolean; deadlineMs?: number }
@@ -207,4 +208,6 @@ export type PtyControllerInventory = Readonly<{
   allLivePtyIds: ReadonlySet<string>
   terminalIdentityByPtyId: ReadonlyMap<string, PtyControllerTerminalIdentity>
   queriedHostIds: ReadonlySet<ExecutionHostId>
+  /** Live PTYs the host is killing: still live work, but no longer any pane's to show. */
+  exitingPtyIds?: ReadonlySet<string>
 }>
