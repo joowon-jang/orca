@@ -8,6 +8,7 @@ import type { AgentJournalStatusItem } from '../../../../shared/agent-session-jo
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { MessageRow } from './NativeChatMessageRow'
 import { NativeChatNoticeRow } from './NativeChatNoticeRow'
+import { useAppStore } from '@/store'
 import { i18n } from '@/i18n/i18n'
 import { agentSessionFailureWords } from '../../../../shared/agent-session-failure-words'
 import { agentSessionFailureFact } from '../../../../shared/agent-session-failure'
@@ -540,4 +541,63 @@ describe('Codex installation in notice rows', () => {
       expect(screen.queryByRole('button')).toBeNull()
     }
   )
+})
+
+it('opens Antigravity accounts from its signed-out notice, and offers no link for other failures', () => {
+  const original = useAppStore.getState()
+  const openSettingsPage = vi.fn()
+  const openSettingsTarget = vi.fn()
+  useAppStore.setState({ openSettingsPage, openSettingsTarget })
+  try {
+    renderStatus(
+      {
+        kind: 'status',
+        tone: 'error',
+        ...agentSessionFailureWords(
+          { kind: 'notSignedIn' },
+          { agentName: 'Antigravity', surface: 'row' }
+        )
+      },
+      null,
+      false,
+      false,
+      'Antigravity'
+    )
+    const link = screen.getByRole('link', { name: 'Settings → Accounts → Antigravity' })
+    expect(link.parentElement).toHaveTextContent(
+      "Antigravity isn't signed in. Sign in under Settings → Accounts → Antigravity. Then send your message again."
+    )
+    expect(screen.queryByRole('button')).toBeNull()
+    fireEvent.click(link)
+    expect(openSettingsTarget).toHaveBeenCalledExactlyOnceWith({
+      pane: 'accounts',
+      repoId: null,
+      sectionId: 'accounts-antigravity'
+    })
+    expect(openSettingsPage).toHaveBeenCalledOnce()
+    cleanup()
+    for (const [agentName, kind] of [
+      ['Antigravity', 'startFailed'],
+      ['Claude', 'notSignedIn']
+    ] as const) {
+      renderStatus(
+        {
+          kind: 'status',
+          tone: 'error',
+          ...agentSessionFailureWords({ kind }, { agentName, surface: 'row' })
+        },
+        null,
+        false,
+        false,
+        agentName
+      )
+      expect(screen.queryByRole('link')).toBeNull()
+      cleanup()
+    }
+  } finally {
+    useAppStore.setState({
+      openSettingsPage: original.openSettingsPage,
+      openSettingsTarget: original.openSettingsTarget
+    })
+  }
 })

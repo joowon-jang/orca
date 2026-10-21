@@ -1,6 +1,7 @@
 import { createElement, useState } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { colors } from '../theme/mobile-theme'
 import type { SessionOptionDescriptor } from '../../../src/shared/native-chat-session-options'
 import {
   MobileNativeChatSessionOptionPickers,
@@ -22,7 +23,10 @@ vi.mock('lucide-react-native', () => ({
   ChevronDown: 'ChevronDown',
   ChevronLeft: 'ChevronLeft',
   ChevronRight: 'ChevronRight',
+  FilePenLine: 'FilePenLine',
+  Hand: 'Hand',
   ShieldAlert: 'ShieldAlert',
+  ShieldCheck: 'ShieldCheck',
   X: 'X'
 }))
 vi.mock('../components/BottomDrawer', async () => {
@@ -333,18 +337,41 @@ describe('MobileNativeChatSessionOptionPickers', () => {
     expect(rowByText('Sonnet 5').props.accessibilityRole).toBe('radio')
   })
 
-  it('names the pill for the permission mode where the agent has no model, and closes on a pick', async () => {
-    mount([PERMISSION_DESCRIPTOR], true)
-    expect(pill('Permissions').props).toMatchObject({
-      accessibilityLabel: 'Permissions, Ask for approval',
-      disabled: false
-    })
-    setOption.mockImplementation(() => new Promise(() => {}))
-    await act(async () => pill('Permissions').props.onPress())
-    await act(async () => rowByText('Full access').props.onPress())
-    expect(setOption).toHaveBeenCalledWith('permissionMode', 'full-access')
-    expect(renderer!.root.findAllByType('BottomDrawer')).toEqual([])
-  })
+  it.each([
+    ['ask', 'Ask for approval', 'Hand', 'full-access', 'Full access'],
+    ['full-access', 'Full access', 'ShieldAlert', 'ask', 'Ask for approval'],
+    ['host', "Host's Agent Permissions", null, 'ask', 'Ask for approval']
+  ] as const)(
+    'names the permission-only %s pill and closes its labeled sheet on a pick',
+    async (value, label, icon, nextValue, nextLabel) => {
+      const choices = [
+        { value, label },
+        { value: nextValue, label: nextLabel }
+      ]
+      const kind = { type: 'select' as const, currentValue: value, choices }
+      mount([{ ...PERMISSION_DESCRIPTOR, kind }], true)
+      expect(pill('Permissions').props).toMatchObject({
+        accessibilityLabel: `Permissions, ${label}`,
+        disabled: false
+      })
+      expect(renderer!.root.findAllByType('Text')).toHaveLength(icon ? 0 : 2)
+      expect(renderer!.root.findAllByType('ShieldAlert')).toHaveLength(
+        value === 'full-access' ? 1 : 0
+      )
+      if (icon) {
+        expect(renderer!.root.findAllByType(icon)).toHaveLength(1)
+        expect(renderer!.root.findByType(icon).props.color).toBe(
+          value === 'full-access' ? colors.statusAmber : colors.textSecondary
+        )
+      }
+      setOption.mockImplementation(() => new Promise(() => {}))
+      await act(async () => pill('Permissions').props.onPress())
+      expect(rowByText(nextLabel).props.accessibilityRole).toBe('radio')
+      await act(async () => rowByText(nextLabel).props.onPress())
+      expect(setOption).toHaveBeenCalledWith('permissionMode', nextValue)
+      expect(renderer!.root.findAllByType('BottomDrawer')).toEqual([])
+    }
+  )
 })
 
 const PERMISSION_DESCRIPTOR: SessionOptionDescriptor = {

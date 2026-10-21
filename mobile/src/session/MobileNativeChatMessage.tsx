@@ -21,7 +21,10 @@ import type {
 import { MobileSourceCopyButton } from '../components/MobileSourceCopyButton'
 import { nativeChatMessagePlainText } from './mobile-native-chat-message-plain-text'
 import { deriveNativeChatRowContent } from '../../../src/shared/native-chat-row-content'
-import { MobileNativeChatReasoningRow } from './MobileNativeChatReasoningRow'
+import {
+  MobileNativeChatGroupedThought,
+  MobileNativeChatReasoningRow
+} from './MobileNativeChatReasoningRow'
 import { mobileNativeChatRowId } from './MobileNativeChatScrollHold'
 import { nativeChatWorkRunEntries } from '../../../src/shared/native-chat-work-run'
 import { nativeChatReasoningDisclosureKey } from '../../../src/shared/native-chat-reasoning-row'
@@ -43,11 +46,12 @@ import type { NativeChatTurnStatus } from './use-mobile-native-chat-turn-status'
 import { styles } from './mobile-native-chat-message-styles'
 import { agentMessageAttribution } from './mobile-agent-message-attribution'
 import { MobileNativeChatVisualContext } from './mobile-native-chat-visual-context'
+import { useMobileNativeChatFullMessage } from './MobileNativeChatFullContent'
 import { MobileNativeChatPacedProse } from './MobileNativeChatPacedProse'
 import { Prose } from './MobileNativeChatProse'
 
 function MobileNativeChatMessageImpl({
-  message,
+  message: rowMessage,
   rowKey,
   runOwner,
   mayStillGrow = false,
@@ -132,6 +136,7 @@ function MobileNativeChatMessageImpl({
   userMessageOpen?: boolean
   onToggleUserMessage?: (messageId: string) => void
 }): React.JSX.Element {
+  const { shown: message, showFull, recovery } = useMobileNativeChatFullMessage(rowMessage)
   // Another agent's message is set apart from the person's bubble, left-aligned and named.
   const attribution = agentMessageAttribution('Message from', message.from)
   const isUser = message.role === 'user' && attribution === null
@@ -151,10 +156,9 @@ function MobileNativeChatMessageImpl({
     }
     const thought = (thoughtMessage: NativeChatMessage): React.JSX.Element => (
       // Keyed by the thought, so it stays mounted as calls arrive after it.
-      <MobileNativeChatReasoningRow
+      <MobileNativeChatGroupedThought
         key={`thought:${thoughtMessage.id}`}
         message={thoughtMessage}
-        markdown={deriveNativeChatRowContent(thoughtMessage.blocks).markdown}
         fontScale={fontScale}
         live={activeTurnIsWorking === true}
         expanded={openReasoning?.has(nativeChatReasoningDisclosureKey(thoughtMessage.id)) === true}
@@ -251,6 +255,7 @@ function MobileNativeChatMessageImpl({
               onOpenFile={onOpenFile}
               onLongPress={onLongPress}
             />
+            {showFull}
           </View>
         ) : null}
         {turnStatusAbove ? null : statusRow}
@@ -322,6 +327,8 @@ function MobileNativeChatMessageImpl({
                 fontScale={fontScale}
                 open={userMessageOpen === true}
                 onToggle={() => onToggleUserMessage?.(message.id)}
+                recovery={recovery}
+                status={showFull}
               >
                 {proseRows(drawnProse.filter((block) => !isImageRefBlock(block)))}
               </MobileNativeChatUserMessageFold>
@@ -336,6 +343,7 @@ function MobileNativeChatMessageImpl({
               {(block, index, shown) => proseRow(block, index, shown.text, shown.revealing)}
             </MobileNativeChatPacedProse>
           )}
+          {isUser ? null : showFull}
           {askRow}
           {showToolRun ? (
             <ToolRun

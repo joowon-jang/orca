@@ -244,11 +244,11 @@ export class PiRpcSession {
     this.failedCause ??= error
     this.dialogs.cancelAll()
     this.turns.end()
-    this.lane.finalize()
-    this.lane.apply([
-      { type: 'session.ended', verdict: { state: 'interrupted', completedAt: Date.now() } }
-    ])
-    this.lane.flush()
+    // The lane is sealed once finalized, so the end event travels with the final transfer.
+    this.lane.finalize({
+      type: 'session.ended',
+      verdict: { state: 'interrupted', completedAt: Date.now() }
+    })
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       await Promise.race([

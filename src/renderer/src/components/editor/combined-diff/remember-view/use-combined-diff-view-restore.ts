@@ -21,7 +21,8 @@ import {
   readCombinedDiffViewMemory,
   releaseCombinedDiffView,
   rememberCombinedDiffView,
-  type CombinedDiffViewLease
+  type CombinedDiffViewLease,
+  type CombinedDiffViewSuccession
 } from './combined-diff-view-cache'
 
 export type CombinedDiffViewRestore = {
@@ -40,6 +41,7 @@ export function useCombinedDiffViewRestore({
   setSectionHeights,
   setSections,
   setSideBySide,
+  succession,
   viewStateKey,
   worktreeId
 }: {
@@ -50,6 +52,8 @@ export function useCombinedDiffViewRestore({
   setSectionHeights: React.Dispatch<React.SetStateAction<Record<number, number>>>
   setSections: React.Dispatch<React.SetStateAction<DiffSection[]>>
   setSideBySide: React.Dispatch<React.SetStateAction<boolean>>
+  /** Set for tab-scoped keys so a reopened tab restores the view its closed predecessor left. */
+  succession?: CombinedDiffViewSuccession
   viewStateKey: string
   worktreeId: string
 }): CombinedDiffViewRestore {
@@ -75,7 +79,11 @@ export function useCombinedDiffViewRestore({
   // throws the result away, and an anchor seeds legitimately to null so a nullish guard would keep
   // re-reading. useState's initializer runs once without writing a ref during render.
   const [restoreSeed] = useState<{ offset: number; anchor: VirtualizedScrollAnchor }>(() => {
-    const memory = readCombinedDiffViewMemory(viewStateKey)
+    // Why: preview the inherited view here — the claim below moves it only after this first render seeds the virtualizer.
+    const memory = readCombinedDiffViewMemory(
+      viewStateKey,
+      succession ? { worktreeId, succession } : undefined
+    )
     return { offset: memory?.scrollTop ?? 0, anchor: memory?.scrollAnchor ?? null }
   })
   const scrollOffsetRef = useRef(restoreSeed.offset)
@@ -84,11 +92,24 @@ export function useCombinedDiffViewRestore({
 
   // Why: keep above CombinedDiffViewer's persist/scroll hooks so the lease exists before their effects write.
   const memoryLeaseRef = useRef<CombinedDiffViewLease | null>(null)
+  const successionContentKey = succession?.contentKey
+  const successionScopeId = succession?.scopeId
+  const isSuccessionScopeOpen = succession?.isScopeOpen
   useLayoutEffect(() => {
-    const lease = claimCombinedDiffView(viewStateKey, worktreeId)
+    const lease = claimCombinedDiffView(
+      viewStateKey,
+      worktreeId,
+      successionContentKey !== undefined && successionScopeId !== undefined && isSuccessionScopeOpen
+        ? {
+            contentKey: successionContentKey,
+            scopeId: successionScopeId,
+            isScopeOpen: isSuccessionScopeOpen
+          }
+        : undefined
+    )
     memoryLeaseRef.current = lease
     return () => releaseCombinedDiffView(lease)
-  }, [viewStateKey, worktreeId])
+  }, [isSuccessionScopeOpen, successionContentKey, successionScopeId, viewStateKey, worktreeId])
 
   // Why: tab/worktree switches unmount this viewer; cache by pane key so remount restores sections+scroll before repaint.
   const initializedEntryStateRef = useRef<{

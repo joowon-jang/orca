@@ -154,7 +154,7 @@ export class OrcadManagedTunnelManager {
       connection,
       forwards: this.forwards,
       localPort: 0,
-      label: 'Managed Orca server',
+      label: 'Orca on this host',
       remotePort,
       rereadRemotePort: checks.rereadRemotePort,
       verify: checks.verify,
@@ -294,7 +294,7 @@ export class OrcadManagedTunnelManager {
       connection,
       forwards: this.forwards,
       localPort: deployment.localPort,
-      label: `Managed Orca server: ${environment.name}`,
+      label: `Orca on ${environment.name}`,
       ...checks,
       stillCurrent: () => stillOwned() && connection.getConnectGeneration() === transportGeneration
     })

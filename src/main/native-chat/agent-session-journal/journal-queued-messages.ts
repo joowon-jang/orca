@@ -45,7 +45,7 @@ import { AgentSessionJournalError, assertJournalWritable } from './journal-write
 import type { JournalWriteResult } from './journal-write-queue'
 import { QueuedMessageNotConsumableError } from './queued-message-consume-error'
 import { QueuedMessageEditLeases } from './queued-message-edit-leases'
-import { updateQueuedMessageText, type QueuedMessageTextUpdate } from './queued-message-text-update'
+import { updateQueuedMessage, type QueuedMessageUpdate } from './queued-message-update'
 
 /** Tombstones must outlive the window in which their operation id could still be admitted as new. */
 export const QUEUED_MESSAGE_REPLAY_WINDOW_MS =
@@ -88,10 +88,14 @@ export class JournalQueuedMessages {
     return getQueuedMessage(this.deps.database().db, this.deps.sessionId, messageId)
   }
 
-  /** An in-place text edit; a changed card spends every edit lease on its old text. */
-  update(input: QueuedMessageTextUpdate): Promise<ReturnType<typeof updateQueuedMessageText>> {
+  /** An in-place edit; a changed card spends every edit lease on its old body. Only uploads the
+   *  old body did not name must still be stored, so a swept kept image never blocks a text fix. */
+  update(input: QueuedMessageUpdate): Promise<ReturnType<typeof updateQueuedMessage>> {
     return this.transact(
-      (db) => updateQueuedMessageText(db, this.deps.sessionId, input),
+      (db) =>
+        updateQueuedMessage(db, this.deps.sessionId, input, (body, previous) =>
+          this.deps.claimAttachments(db, body, true, previous)
+        ),
       (result) => result.status === 'updated',
       undefined,
       () => this.editLeases.retire(input.messageId)

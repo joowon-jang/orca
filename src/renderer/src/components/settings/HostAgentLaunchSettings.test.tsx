@@ -18,12 +18,14 @@ const transport = vi.hoisted(() => ({
   read: vi.fn(),
   mutate: vi.fn(),
   detection: vi.fn(),
-  auto: vi.fn()
+  auto: vi.fn(),
+  native: vi.fn()
 }))
 vi.mock('./agent-launch-settings-transport', () => ({
   readHostAgentLaunchSettings: transport.read,
   mutateHostAgentLaunchSettings: transport.mutate,
-  hostSupportsAutoPermissions: transport.auto
+  hostSupportsAutoPermissions: transport.auto,
+  hostSupportsNativeChatPermissions: transport.native
 }))
 vi.mock('@/hooks/useDetectedAgents', () => ({
   useDetectedAgents: (target: unknown) => {
@@ -62,6 +64,7 @@ beforeEach(() => {
   transport.mutate.mockReset().mockResolvedValue(host())
   transport.detection.mockClear()
   transport.auto.mockReset().mockResolvedValue(true)
+  transport.native.mockReset().mockResolvedValue(true)
 })
 
 describe('host launch settings form', () => {
@@ -87,13 +90,43 @@ describe('host launch settings form', () => {
         await waitFor(() =>
           expect(transport.mutate).toHaveBeenCalledWith(
             { environmentId: 'ssh-host', pairingRevision: 17 },
-            { type: 'permissions', mode: 'auto' },
+            { type: 'permissions', mode: 'auto', syncNativeChat: true },
             expect.any(AbortSignal)
           )
         )
       } else {
         expect(transport.mutate).not.toHaveBeenCalled()
       }
+    }
+  )
+
+  it.each([false, true])(
+    'sends native synchronization only when the host supports it: %s',
+    async (nativeSupported) => {
+      transport.native.mockResolvedValue(nativeSupported)
+      render(
+        <TooltipProvider>
+          <HostAgentLaunchSettings
+            environmentId="ssh-host"
+            pairingRevision={17}
+            hostName="SSH host"
+            renderPermissions={(props) => <AgentPermissionsSetting {...props} />}
+          />
+        </TooltipProvider>
+      )
+      await screen.findByDisplayValue('--host-marker')
+      fireEvent.click(screen.getByRole('radio', { name: 'Manual' }))
+      await waitFor(() =>
+        expect(transport.mutate).toHaveBeenCalledWith(
+          { environmentId: 'ssh-host', pairingRevision: 17 },
+          {
+            type: 'permissions',
+            mode: 'manual',
+            ...(nativeSupported ? { syncNativeChat: true } : {})
+          },
+          expect.any(AbortSignal)
+        )
+      )
     }
   )
 
@@ -127,7 +160,7 @@ describe('host launch settings form', () => {
     await waitFor(() =>
       expect(transport.mutate).toHaveBeenCalledWith(
         { environmentId: 'ssh-host', pairingRevision: 17 },
-        { type: 'permissions', mode: 'manual', exceptAuto: true },
+        { type: 'permissions', mode: 'manual', exceptAuto: true, syncNativeChat: true },
         expect.any(AbortSignal)
       )
     )
@@ -151,7 +184,7 @@ describe('host launch settings form', () => {
     await waitFor(() =>
       expect(transport.mutate).toHaveBeenCalledWith(
         { environmentId: 'ssh-host', pairingRevision: 17 },
-        { type: 'permissions', agent: 'claude', mode: 'auto' },
+        { type: 'permissions', agent: 'claude', mode: 'auto', syncNativeChat: true },
         expect.any(AbortSignal)
       )
     )
@@ -301,7 +334,7 @@ describe('host launch settings form', () => {
     await waitFor(() =>
       expect(transport.mutate).toHaveBeenCalledWith(
         { environmentId: 'ssh-host', pairingRevision: 17 },
-        { type: 'permissions', mode: 'manual' },
+        { type: 'permissions', mode: 'manual', syncNativeChat: true },
         expect.any(AbortSignal)
       )
     )
@@ -321,7 +354,7 @@ describe('host launch settings form', () => {
     await waitFor(() =>
       expect(transport.mutate).toHaveBeenCalledWith(
         { environmentId: 'ssh-host', pairingRevision: 17 },
-        { type: 'permissions', mode: 'manual' },
+        { type: 'permissions', mode: 'manual', syncNativeChat: true },
         expect.any(AbortSignal)
       )
     )
@@ -367,7 +400,8 @@ describe('host launch settings form', () => {
     await waitFor(() => expect(transport.mutate).toHaveBeenCalledTimes(2))
     expect(transport.mutate.mock.calls[1]?.[1]).toEqual({
       type: 'permissions',
-      mode: 'manual'
+      mode: 'manual',
+      syncNativeChat: true
     })
   })
 

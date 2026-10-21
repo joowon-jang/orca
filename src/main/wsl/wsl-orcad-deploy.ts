@@ -118,7 +118,7 @@ async function launchOverTransport(
   const kernel = await execCommand(conn, 'uname -r', { signal })
   if (isWsl1KernelRelease(kernel)) {
     throw new OrcadHostUnsupportedError(
-      `The WSL 1 distro ${name} is not supported by managed orcad. ` +
+      `The WSL 1 distro ${name} isn’t supported by Orca’s server. ` +
         `Convert it with: wsl --set-version ${name} 2`
     )
   }

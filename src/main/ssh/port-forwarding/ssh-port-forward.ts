@@ -88,6 +88,11 @@ export class SshPortForwardManager {
     remotePort: number,
     label?: string
   ): Promise<PortForwardEntry> {
+    // Why: a teardown disposes its connection at once, so an add or edit that reaches here later
+    // (its connection picked before the teardown) must not open a forward that outlives it.
+    if (conn.isDisposed()) {
+      throw new PortForwardTornDownError()
+    }
     const provider = this.providers.find((candidate) => candidate.canHandle(conn))
     if (!provider) {
       throw new Error('SSH connection is not established')
@@ -119,7 +124,7 @@ export class SshPortForwardManager {
         }
       })
       // Why checked with the registration: a teardown between the two would miss this forward.
-      if (starting.closed) {
+      if (starting.closed || conn.isDisposed()) {
         await started.close()
         throw new PortForwardTornDownError()
       }

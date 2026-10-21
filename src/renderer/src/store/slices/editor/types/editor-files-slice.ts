@@ -78,7 +78,8 @@ export type EditorFilesSlice = {
       | 'language'
       | 'runtimeEnvironmentId'
       | 'externalSshTargetId'
-    >,
+    > &
+      Partial<Pick<OpenFile, 'terminalArtifactGrantId' | 'readOnly'>>,
     options?: { anchor?: string | null; targetGroupId?: string; sourceFileId?: string }
   ) => void
   makePreviewFilePermanent: (fileId: string, tabId?: string) => void
@@ -94,7 +95,8 @@ export type EditorFilesSlice = {
   setActiveFile: (fileId: string, targetWorktreeId?: string) => void
   markFileDirty: (fileId: string, dirty: boolean) => void
   setExternalMutation: (fileId: string, mutation: 'deleted' | 'renamed' | 'changed' | null) => void
-  setLastKnownDiskSignature: (fileId: string, signature: string) => void
+  /** `undefined` un-records a baseline a failed operation stamped provisionally. */
+  setLastKnownDiskSignature: (fileId: string, signature: string | undefined) => void
   clearPendingDiskBaselineVerification: (fileId: string) => void
   setPendingDiskBaselineVerification: (fileId: string, value: boolean) => void
   setPendingLiveDiskVerification: (fileId: string, value: boolean) => void

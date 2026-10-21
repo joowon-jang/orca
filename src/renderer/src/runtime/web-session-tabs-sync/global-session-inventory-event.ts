@@ -2,7 +2,7 @@ import { toRuntimeExecutionHostId } from '../../../../shared/execution-host'
 import type { RuntimeMobileSessionTabsResult } from '../../../../shared/runtime-types'
 import { recheckUnconfirmedStructuredAgentLaunches } from '../../lib/structured-agent-session-launch-unconfirmed-recheck'
 import { useAppStore } from '../../store'
-import { recoverWebSessionTerminalOrphansBeforeApply } from '../web-session-terminal-orphan-recovery'
+import { recoverMirroredTerminalOrphansBeforeApply } from './mirror-terminal-orphan-recovery'
 import { queueAcceptedWebSessionTerminalSnapshot } from '../web-session-terminal-handle-events'
 import {
   recordReceivedWebSessionTabsInventory,
@@ -88,7 +88,7 @@ export function handleGlobalSessionInventoryEvent({
     event.snapshots.map((snapshot, index) =>
       unchanged[index]
         ? Promise.resolve(snapshot)
-        : recoverWebSessionTerminalOrphansBeforeApply(
+        : recoverMirroredTerminalOrphansBeforeApply(
             useAppStore.getState(),
             snapshot,
             environmentId,

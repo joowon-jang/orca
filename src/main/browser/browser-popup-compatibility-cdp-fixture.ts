@@ -12,7 +12,10 @@ import { build as buildVite } from 'vite'
 import { waitForBrowserCdpEndpoint } from './browser-session-ua-cdp-collector'
 import { popupFixtureHtml } from './browser-popup-compatibility-page-fixture'
 import { resolveElectronProbeLaunch } from './electron-probe-display-launch'
-import { startHiddenRendererFrameCapture } from './hidden-renderer-frame-capture-fixture'
+import {
+  HIDDEN_RENDERER_FIRST_FRAME_TIMEOUT_MS,
+  startHiddenRendererFrameCapture
+} from './hidden-renderer-frame-capture-fixture'
 
 // Hidden renderer startup and CDP events can exceed the default one-second poll on CI.
 vi.setConfig({ expect: { poll: { timeout: 10_000 } } })
@@ -214,7 +217,7 @@ beforeAll(async () => {
     stopFrameCaptures.set(
       page,
       await startHiddenRendererFrameCapture(page, (hasFrame) =>
-        waitForFixture(hasFrame, 45_000).catch((error: unknown) => {
+        waitForFixture(hasFrame, HIDDEN_RENDERER_FIRST_FRAME_TIMEOUT_MS).catch((error: unknown) => {
           throw new Error(`No first frame for ${name}`, { cause: error })
         })
       )

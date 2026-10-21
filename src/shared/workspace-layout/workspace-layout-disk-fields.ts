@@ -68,7 +68,8 @@ type PartSources = {
     | Prefixed<'file', keyof LayoutEditorFile>
     | Prefixed<'browserTab', keyof LayoutBrowserTab>
     // `$key`: the map key the entry is stored under.
-    | Prefixed<'leaf', Exclude<keyof LayoutLeaf, 'sleeping'> | '$key'>
+    // `ptyGeneration` is in memory only: a load starts every pane's count afresh.
+    | Prefixed<'leaf', Exclude<keyof LayoutLeaf, 'sleeping' | 'ptyGeneration'> | '$key'>
     | Prefixed<'leaf.sleeping', keyof LayoutSleepingRecord>
     | Prefixed<'closedTab', keyof LayoutClosedTab>
   desktopView:
@@ -184,7 +185,8 @@ const LAYOUT = {
   ptyIdsByLeafId: { from: 'leaf.ptyId', via: ['tab.panes.root'] },
   buffersByLeafId: { from: 'scrollback.buffer', via: ['tab.panes.root'] },
   scrollbackRefsByLeafId: { from: 'scrollback.scrollbackRef', via: ['tab.panes.root'] },
-  titlesByLeafId: { from: 'leaf.title', via: ['tab.panes.root'] }
+  titlesByLeafId: { from: 'leaf.title', via: ['tab.panes.root'] },
+  lastGridsByLeafId: { from: 'leaf.lastGrid', via: ['tab.panes.root'] }
 } as const satisfies Record<keyof TerminalLayoutSnapshot, DiskFieldWritten>
 
 const FILE = {

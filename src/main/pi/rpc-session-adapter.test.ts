@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { agentJournalItemKey } from '../../shared/agent-session-journal-item-key'
+import { AGENT_JOURNAL_THREAD_SCOPE } from '../../shared/agent-session-journal-types'
 import { agentJournalTurnBody } from '../../shared/agent-session-turn-record'
 import { AgentSessionAcquisitionRootExitObservedError } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import { JsonlRpcResponseError } from '../jsonl-rpc/peer'
@@ -45,42 +46,52 @@ describe('Pi RPC session ownership and delivery', () => {
     expect(h.connections).toHaveLength(2)
   })
 
-  it('retains final events when exit publication times out under journal backpressure', async () => {
-    let blocked = true
-    const h = await setup({}, (sink) => ({
-      ...sink,
-      tryAppendTransition: (transition) =>
-        blocked
-          ? { accepted: false, reason: 'backpressure' }
-          : sink.tryAppendTransition!(transition)
-    }))
-    vi.useFakeTimers()
-    h.connection.receive({
-      type: 'extension_ui_request',
-      id: 'last-dialog',
-      method: 'input',
-      title: 'Final tail'
-    })
-    h.connection.exit()
-    await vi.advanceTimersByTimeAsync(2_001)
-    expect(h.lifecycle).toHaveBeenCalledOnce()
-    h.adapter.acknowledgeSessionRelease(sessionId)
-    let completed = false
-    const drained = h.adapter.drainObservedExits().then(() => {
-      completed = true
-    })
-    await Promise.resolve()
-    expect(completed).toBe(false)
-    blocked = false
-    await vi.advanceTimersByTimeAsync(250)
-    await drained
-    expect(
-      (await h.rig.rows()).some(
-        (row) => row.body.kind === 'question' && row.body.question === 'Final tail'
-      )
-    ).toBe(true)
-    vi.useRealTimers()
+  it('persists final events after exit while journal writes are blocked', async () => {
+    const h = await setup()
+    const gate = Promise.withResolvers<void>()
+    try {
+      const blocked = h.rig.journal.readInOrder(() => {
+        expect(
+          h.rig.eventSink.tryAppendItem?.(
+            { provider: 'legacy', agent: 'pi', sessionId, recordId: 'before' },
+            { kind: 'status', tone: 'info', text: 'before' },
+            { turnScope: AGENT_JOURNAL_THREAD_SCOPE }
+          )
+        ).toEqual({ accepted: true })
+        return gate.promise
+      })
+      vi.useFakeTimers()
+      h.connection.receive({
+        type: 'extension_ui_request',
+        id: 'last-dialog',
+        method: 'input',
+        title: 'Final tail'
+      })
+      h.connection.exit()
+      let completed = false
+      const written = h.rig.eventSink.written?.().then((result) => {
+        completed = true
+        return result
+      })
+      await vi.advanceTimersByTimeAsync(2_001)
+      expect(h.lifecycle).toHaveBeenCalledOnce()
+      h.adapter.acknowledgeSessionRelease(sessionId)
+      await h.adapter.drainObservedExits()
+      expect(completed).toBe(false)
+      gate.resolve()
+      await blocked
+      expect(await written).toEqual({ ok: true })
+      expect(
+        (await h.rig.rows()).some(
+          (row) => row.body.kind === 'question' && row.body.question === 'Final tail'
+        )
+      ).toBe(true)
+    } finally {
+      gate.resolve()
+      vi.useRealTimers()
+    }
   })
+
   it('lets a new acquisition proceed while the released child drains final stdout', async () => {
     const h = await setup()
     h.connection.deferExit = true

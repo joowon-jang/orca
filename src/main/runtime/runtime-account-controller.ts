@@ -1,4 +1,5 @@
 import type { ClaudeAccountService } from '../claude-accounts/service'
+import { retireAtRestCommandContext } from '../native-chat/agent-session-wire/at-rest-command-context'
 import { hasAppEnvironment } from '../../shared/app-environment'
 import { getManagedDataAccountService } from '../managed-data-accounts/service'
 import type {
@@ -89,7 +90,11 @@ export class RuntimeAccountController {
     if (this.services) {
       throw new Error('This host manages its own provider accounts.')
     }
+    const previous = this.hostLaunchEnv
     this.hostLaunchEnv = launchEnv
+    if (JSON.stringify(previous) !== JSON.stringify(launchEnv)) {
+      retireAtRestCommandContext()
+    }
     try {
       this.persistHostLaunchEnv?.(launchEnv)
     } catch (error) {
@@ -105,13 +110,27 @@ export class RuntimeAccountController {
   ): void {
     this.persistHostLaunchEnv = persist
     if (saved && !this.services) {
+      const previous = this.hostLaunchEnv
       this.hostLaunchEnv = saved
+      if (JSON.stringify(previous) !== JSON.stringify(saved)) {
+        retireAtRestCommandContext()
+      }
     }
   }
 
   /** The desktop-selected account env for a process `agent` starts here; empty when none. */
   hostLaunchEnvFor(agent: string | null | undefined): Readonly<Record<string, string>> {
     return hostAccountLaunchEnvFor(this.hostLaunchEnv, agent)
+  }
+
+  /** Null where the desktop that owns this host's accounts polls usage instead (a WSL host). */
+  usageRateLimits(): RateLimitService | null {
+    return this.services?.rateLimits ?? null
+  }
+
+  /** Refuses where no poller would read a saved key, so a save is never reported for nothing. */
+  requireUsageRateLimits(): RateLimitService {
+    return this.requireServices().rateLimits
   }
 
   getClaudeConfigDirectory(target: ClaudeAccountSelectionTarget): string | null {

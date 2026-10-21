@@ -17,6 +17,10 @@ import {
   type AgentSessionUsageLimit
 } from './agent-session-usage-limit'
 
+import {
+  readAgentSessionRequestTimeout,
+  type AgentSessionRequestTimeout
+} from './agent-session-request-timeout'
 import { structuralValuesEqualIgnoringUndefined } from './structural-value-equality'
 import {
   readAgentSessionRefusalReference,
@@ -182,6 +186,8 @@ export type AgentSessionFailureFact = {
   neverReachedAgent?: true
   /** On `backgroundTaskNotStopped`: one named task, or every task the Stop reached. */
   backgroundStop?: AgentSessionBackgroundStop
+  /** On `startFailed`: the provider request that got no answer before Orca's deadline. */
+  requestTimeout?: AgentSessionRequestTimeout
 }
 
 export type AgentSessionBackgroundStop = 'task' | 'all'
@@ -220,6 +226,7 @@ export function agentSessionFailureFact<TKind extends AgentSessionFailureKind>(
     argumentProblem?: AgentSessionArgumentProblem
     neverReachedAgent?: true
     backgroundStop?: AgentSessionBackgroundStop
+    requestTimeout?: AgentSessionRequestTimeout
   } = {}
 ): AgentSessionFailureFact & { kind: TKind } {
   // Re-bounded here, so no writer can store more than the cap however it built the detail.
@@ -236,7 +243,8 @@ export function agentSessionFailureFact<TKind extends AgentSessionFailureKind>(
     ...(extra.usageLimit ? { usageLimit: extra.usageLimit } : {}),
     ...(extra.argumentProblem ? { argumentProblem: extra.argumentProblem } : {}),
     ...(extra.neverReachedAgent ? { neverReachedAgent: true as const } : {}),
-    ...(extra.backgroundStop ? { backgroundStop: extra.backgroundStop } : {})
+    ...(extra.backgroundStop ? { backgroundStop: extra.backgroundStop } : {}),
+    ...(extra.requestTimeout ? { requestTimeout: extra.requestTimeout } : {})
   }
 }
 
@@ -306,6 +314,7 @@ export function readAgentSessionFailureFact(value: unknown): AgentSessionFailure
   const retry = readProviderRetry(value.retry)
   const usageLimit = readAgentSessionUsageLimit(value.usageLimit)
   const argumentProblem = readAgentSessionArgumentProblem(value.argumentProblem)
+  const requestTimeout = readAgentSessionRequestTimeout(value.requestTimeout)
   return agentSessionFailureFact(value.kind, {
     ...(value.account === 'managed' || value.account === 'system'
       ? { account: value.account }
@@ -319,7 +328,8 @@ export function readAgentSessionFailureFact(value: unknown): AgentSessionFailure
     ...(value.neverReachedAgent === true ? { neverReachedAgent: true as const } : {}),
     ...(value.backgroundStop === 'task' || value.backgroundStop === 'all'
       ? { backgroundStop: value.backgroundStop }
-      : {})
+      : {}),
+    ...(requestTimeout ? { requestTimeout } : {})
   })
 }
 

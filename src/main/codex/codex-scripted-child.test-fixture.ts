@@ -6,6 +6,7 @@ import type {
 import { CodexAppServerRequestError } from './codex-app-server-connection'
 import { CodexAppServerTimeoutError } from './codex-app-server-session'
 import { codexTurnLifecycleFake } from './codex-turn-lifecycle-fake'
+import { withProviderRequestTimeout } from '../provider-process/provider-request-timeout'
 
 export const CODEX_SCRIPTED_THREAD = 'scripted-codex-thread'
 const THREAD = CODEX_SCRIPTED_THREAD
@@ -18,18 +19,24 @@ export type ScriptedCodexChild = ScriptedAgentChild & {
 }
 
 /** A held answer gives up on the request's own deadline, as the real connection's does (30 s when
- *  the caller names none). */
+ *  the caller names none, never when it passes null). */
 function heldAnswer(
   answer: Promise<unknown>,
   method: string,
-  timeoutMs = 30_000
+  timeoutMs: number | null = 30_000
 ): Promise<unknown> {
+  if (timeoutMs === null) {
+    return answer
+  }
   let timer: ReturnType<typeof setTimeout> | undefined
   const timedOut = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(
       () =>
         reject(
-          new CodexAppServerTimeoutError(`codex app-server ${method} exceeded ${timeoutMs}ms`)
+          withProviderRequestTimeout(
+            new CodexAppServerTimeoutError(`codex app-server ${method} exceeded ${timeoutMs}ms`),
+            { method, timeoutMs }
+          )
         ),
       timeoutMs
     )

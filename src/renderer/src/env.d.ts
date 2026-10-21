@@ -139,6 +139,8 @@ declare global {
     __e2ePtyAppliedSizeReadDelayMs?: number
     __terminalPtyPreSpawnE2EBarrier?: TerminalPtyPreSpawnE2EBarrier
     __endLocalLayoutStreamE2E?: LocalLayoutStreamE2EEnd
+    /** E2E builds only: whether a paired server's layout frames, not the mirror, draw the workspace. */
+    __isFrameDrawnServerWorkspaceE2E?: (environmentId: string, worktreeId: string) => boolean
   }
 }
 

@@ -39,9 +39,9 @@ export function orcadBoundPort(readiness: Pick<ServeReadiness, 'boundEndpoint'>)
   }
 }
 
-async function readSlotBoundPort(
+async function readManagedOrcadSlotReadiness(
   target: OrcadRemoteExecTarget & { remoteInstallDir: string }
-): Promise<number | null> {
+): Promise<ServeReadiness | null> {
   const parsed = parseOrcadReadinessWaitOutput(
     target.host,
     await execOrcadRemote(
@@ -49,7 +49,14 @@ async function readSlotBoundPort(
       readOrcadReadinessNowCommand(target.host, target.remoteInstallDir)
     )
   )
-  return parsed.state === 'ready' ? orcadBoundPort(parsed.readiness) : null
+  return parsed.state === 'ready' ? parsed.readiness : null
+}
+
+async function readSlotBoundPort(
+  target: OrcadRemoteExecTarget & { remoteInstallDir: string }
+): Promise<number | null> {
+  const readiness = await readManagedOrcadSlotReadiness(target)
+  return readiness ? orcadBoundPort(readiness) : null
 }
 
 /** Falls back to the preferred port only when the slot published no endpoint (older builds). */
@@ -60,22 +67,30 @@ export async function readManagedOrcadBoundPort(
   return (await readSlotBoundPort(target)) ?? preferredPort
 }
 
-/** The bound port the active slot's readiness names now; null when it names none. */
-async function readActiveSlotBoundPort(input: OrcadTunnelPortInput): Promise<number | null> {
-  if (!input.environment.orcadDeployment) {
-    return null
-  }
+/** What the active slot publishes now, read over SSH; null when none is active or ready. */
+export async function readActiveManagedOrcadReadiness(
+  input: Pick<OrcadTunnelPortInput, 'target' | 'connection'>
+): Promise<ServeReadiness | null> {
   const context = await resolveOrcadRemoteContext(input.target, input.connection)
   const active = context.activationRecord.active
   if (!active) {
     return null
   }
-  return readSlotBoundPort({
+  return readManagedOrcadSlotReadiness({
     conn: context.connection,
     host: context.host,
     remoteHome: context.remoteHome,
     remoteInstallDir: managedOrcadInstallDir(context, active)
   })
+}
+
+/** The bound port the active slot's readiness names now; null when it names none. */
+async function readActiveSlotBoundPort(input: OrcadTunnelPortInput): Promise<number | null> {
+  if (!input.environment.orcadDeployment) {
+    return null
+  }
+  const readiness = await readActiveManagedOrcadReadiness(input)
+  return readiness ? orcadBoundPort(readiness) : null
 }
 
 /** Where a tunnel to this environment must point; independent SSH access keeps its own port. */

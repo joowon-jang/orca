@@ -38,7 +38,7 @@ on:
         required: false
         type: string
         default: ''
-      # Why only the app builds read it: the orcad template build refuses a dark switch.
+      # Why: the app, orcad and its test template (--dark-test-template) build with it; releases refuse it.
       layout_owner:
         description: Set to main to build with ORCA_LAYOUT_OWNER=main and record save-divergence reports
         required: false
@@ -471,13 +471,18 @@ jobs:
           slot="$(node config/scripts/build-orcad-prebuilds.mjs --print-slot)"
           pnpm build:orcad-prebuilds
           pnpm build:orcad-prebuilds --require-slots "$slot"
-          # The headless oracle's orcad host must hold the same layout owner as the Electron host.
+          # The headless oracle's orcad host must hold the same layout owner as the Electron host,
+          # and so must the template `orca serve` materializes its server from.
           if [ -n "$LAYOUT_OWNER" ]; then
-            ORCA_LAYOUT_OWNER="$LAYOUT_OWNER" pnpm build:orcad
+            export ORCA_LAYOUT_OWNER="$LAYOUT_OWNER"
+            pnpm build:orcad
+            node config/scripts/build-orcad-template.mjs --targets "$slot" --dark-test-template
+            test -f out/orcad/ORCA_LAYOUT_OWNER_MAIN
+            test -f out/orcad-template/ORCA_LAYOUT_OWNER_MAIN
           else
             pnpm build:orcad
+            node config/scripts/build-orcad-template.mjs --targets "$slot"
           fi
-          node config/scripts/build-orcad-template.mjs --targets "$slot"
       - name: Switch serve hosts on one profile
         if: inputs.test_files == '' || contains(inputs.test_files, 'tests/e2e/orcad-serve-mode-switch.spec.ts')
         env:
@@ -557,11 +562,19 @@ jobs:
           name: e2e-build-out${{ inputs.artifact_suffix }}
           path: out/
       # Built to a path the app does not look at by default, so the relay-era phase has no template.
+      # The switch-on leg deploys a switch-on server, so both sides of the host run one layout owner.
       - name: Build the linux-x64-glibc orcad template
+        env:
+          LAYOUT_OWNER: ${{ inputs.layout_owner }}
         run: |
           pnpm build:orcad-prebuilds
           pnpm build:orcad-prebuilds --require-slots linux-x64-glibc
-          node config/scripts/build-orcad-template.mjs --targets linux-x64-glibc
+          if [ -n "$LAYOUT_OWNER" ]; then
+            ORCA_LAYOUT_OWNER="$LAYOUT_OWNER" node config/scripts/build-orcad-template.mjs --targets linux-x64-glibc --dark-test-template
+            test -f out/orcad-template/ORCA_LAYOUT_OWNER_MAIN
+          else
+            node config/scripts/build-orcad-template.mjs --targets linux-x64-glibc
+          fi
           mv out/orcad-template "$RUNNER_TEMP/orcad-convert-template"
       # The Windows CLI matrix collects here too and skips: it needs a Windows host descriptor.
       - name: Run managed SSH specs on a Docker host

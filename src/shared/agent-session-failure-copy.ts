@@ -28,6 +28,9 @@ export const AGENT_SESSION_FAILURE_COPY = {
   sendAgainToTryOnceMore: 'Send your message again to try once more.',
   couldNotStart: "{{agent}} couldn't start.",
   couldNotRestart: "{{agent}} couldn't restart.",
+  startTimedOut: '{{agent}} took too long to start (no response to {{method}} after {{seconds}}s).',
+  startTimedOutKeepsHappening:
+    'If this keeps happening, the computer running this chat may be overloaded.',
   codexCliTooOld:
     'Codex {{installedVersion}} is too old for chats. Update to {{minimumVersion}} or newer.',
   argumentsUnsupportedOption: 'Saved Arguments contain an unsupported option ({{option}}).',
@@ -47,7 +50,7 @@ export const AGENT_SESSION_FAILURE_COPY = {
   codexManagedNotSignedIn:
     "This Codex account isn't signed in. Sign in again in Codex Accounts settings.",
   antigravityNotSignedIn:
-    "Antigravity isn't signed in. Sign in under Settings → Accounts → Antigravity.",
+    "Antigravity isn't signed in. Sign in under Settings → Accounts → Antigravity. Then send your message again.",
   agentCommandNotSignedIn:
     'Sign in to {{agent}} with `{{loginCommand}}` on the computer running this chat.',
   interactiveAgentNotSignedIn:
@@ -179,6 +182,9 @@ export type AgentSessionFailureCopyValues = {
   size?: string
   attempt?: string
   maxRetries?: string
+  /** A provider protocol method that got no answer, e.g. `thread/start`. */
+  method?: string
+  seconds?: string
 }
 
 /** One piece in the reader's language, placeholders filled. */

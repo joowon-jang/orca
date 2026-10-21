@@ -7,6 +7,7 @@ import {
   buildRetractedMirroredTabSweepPatch
 } from './agent-status-primitives'
 import { isWebSessionTabsWorktreeRemovalFrame } from './session-tabs-inventory-absence'
+import { adoptMirroredEditorBuffers } from '../../store/slices/editor/buffers/editor-buffer-record'
 
 type FinalPatchContext = ReturnType<typeof applyActiveStateUpdates>
 
@@ -28,7 +29,6 @@ export function buildWebSessionTabsFinalPatch(
     removedTerminalResourceIds,
     mirroredTerminalIds,
     nextOpenFiles,
-    nextEditorBuffers,
     nextBrowserTabsByWorktree,
     nextUnifiedTabsByWorktree,
     nextGroupsByWorktree,
@@ -97,7 +97,10 @@ export function buildWebSessionTabsFinalPatch(
     ...retractedTabSweepPatch,
     ...remirroredClosedTabLiftPatch,
     ...(nextOpenFiles !== state.openFiles
-      ? { openFiles: nextOpenFiles, editorBuffers: nextEditorBuffers }
+      ? {
+          openFiles: nextOpenFiles,
+          editorBuffers: adoptMirroredEditorBuffers(state.editorBuffers, nextOpenFiles)
+        }
       : {}),
     ...(nextTabsByWorktree !== state.tabsByWorktree ? { tabsByWorktree: nextTabsByWorktree } : {}),
     ...(nextBrowserTabsByWorktree !== state.browserTabsByWorktree

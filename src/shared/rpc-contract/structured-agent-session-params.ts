@@ -279,6 +279,7 @@ export const SetOptionParams = z
   .strict()
 
 export const OptionsParams = z.object({ sessionId: SessionId }).strict()
+export const ItemParams = OptionsParams.extend({ itemId: z.string().min(1) }).strict()
 export const SleepWorkspaceParams = z.object({ workspaceId: z.string().min(1) }).strict()
 export const AcknowledgeAttentionParams = OptionsParams.extend({ observedCursor: JournalCursor })
 
@@ -364,9 +365,7 @@ export const HistoryParams = z
   })
   .strict()
 
-export const SubscribeParams = z
-  .object({ sessionId: SessionId, cursor: JournalCursor.optional() })
-  .strict()
+export const SubscribeParams = OptionsParams.extend({ cursor: JournalCursor.optional() }).strict()
 
 // Not strict: an older host ignores these params entirely, and this host must ignore a newer client's.
 export const SubscribeTurnCompletionsParams = z.object({ includePrompts: z.boolean().optional() })

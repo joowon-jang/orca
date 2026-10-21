@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { ORCA_LAYOUT_OWNER_IS_MAIN } from '../../../shared/layout-owner-switch'
 import { registerAppHandlers } from '../app'
 import { registerCliHandlers } from '../cli'
 import { registerPreflightHandlers } from '../preflight'
@@ -169,6 +170,13 @@ export function registerCoreHandlers(
 
   registerAppHandlers(store, {
     quitResumeRecordsFor: (session) => runtime.quitResumeRecordsFor(session),
+    // Switch point: main derives what the next startup reconnects instead of taking the window's.
+    ...(ORCA_LAYOUT_OWNER_IS_MAIN
+      ? {
+          reconnectFactsFor: (session, partition) =>
+            runtime.shutdownReconnectFactsFor(session, partition)
+        }
+      : {}),
     onBeforeRelaunch: lifecycleOptions.onBeforeRelaunch,
     // Why here, not onBeforeRelaunch: restart and profile switches quit through will-quit, which closes it.
     onBeforeRelaunchExit: () => closeNotificationDismissalsBeforeRelaunch(runtime)

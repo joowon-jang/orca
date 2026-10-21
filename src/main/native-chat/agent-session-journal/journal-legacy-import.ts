@@ -41,10 +41,12 @@ import type { JournalReplacementItem } from './journal-epoch-replacement'
 import {
   boundInlineText,
   boundToolInput,
-  DEFAULT_JOURNAL_PAYLOAD_LIMITS,
   type JournalPayloadLimits
 } from './journal-payload-bounds'
 import type { AgentSessionJournal } from './journal-store'
+
+/** Import preserves the bounded history window; the transcript remains the complete source. */
+export const LEGACY_IMPORT_BLOCK_LIMITS: JournalPayloadLimits = { inlineHeadBytes: 16 * 1024 }
 
 export type LegacyImportOptions = ResolveSessionFileOptions & {
   /** Resolve directly to this file, skipping path discovery. */
@@ -103,7 +105,7 @@ export async function prepareLegacyTranscriptImport(input: {
   options?: LegacyImportOptions
 }): Promise<PreparedLegacyImport> {
   const options = input.options ?? {}
-  const limits = options.limits ?? DEFAULT_JOURNAL_PAYLOAD_LIMITS
+  const limits = options.limits ?? LEGACY_IMPORT_BLOCK_LIMITS
   // OMP is a Pi fork that kept Pi's session format, so OMP's decoder reads Pi's sessions too.
   const transcriptAgent =
     input.agent === 'pi' ? 'omp' : resolveNativeChatTranscriptAgent(input.agent)

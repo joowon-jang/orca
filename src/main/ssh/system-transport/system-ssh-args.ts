@@ -118,7 +118,8 @@ export function buildSshArgs(target: SshTarget, options?: SystemSshBuildArgsOpti
  * user's ssh_config) the master owns the listener and its refusals, so killing the child would
  * neither close the forward nor report why sshd refused it. So a forward logs in on its own, even
  * where a live master holds a login it cannot repeat: through that master its `-N` mux client
- * exits at once and the port stays on the master, out of Orca's reach.
+ * exits at once and the port stays on the master, out of Orca's reach. A managed tunnel whose
+ * forward cannot log in takes the stdio bridge over the master's exec instead.
  */
 export function buildForwardProcessSshArgs(
   target: SshTarget,

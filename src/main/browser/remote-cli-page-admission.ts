@@ -98,6 +98,20 @@ export function assertRemoteCliPageAccess(webContentsId?: number): void {
 }
 
 /**
+ * A host's read of the page: admitted as it starts and again as it answers, since the page can
+ * move to a desktop-local document while the read is in flight. A no-op for the desktop's own.
+ */
+export async function readRemoteCliAdmittedPage<T>(
+  webContentsId: number | undefined,
+  read: () => Promise<T>
+): Promise<T> {
+  assertRemoteCliPageAccess(webContentsId)
+  const result = await read()
+  assertRemoteCliPageAccess(webContentsId)
+  return result
+}
+
+/**
  * Delivers one input event, recording it on the page's hold: a press counts as held once it may
  * have landed, a release only once it surely did.
  */

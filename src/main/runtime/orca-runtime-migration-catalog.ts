@@ -169,8 +169,9 @@ export abstract class OrcaRuntimeWithMigrationCatalog extends OrcaRuntimeWithRes
     return result
   }
 
+  // A moved history is this machine's; a same-id SSH twin's shell never writes it.
   private readonly migrationWorktreeHasLiveShells = (worktreeId: string): boolean =>
-    this.getLivePtyIdsForWorktree(worktreeId).size > 0
+    this.getLivePtyIdsForWorktree(worktreeId, undefined, { resolvedConnectionId: null }).size > 0
 
   // The capability check covers the captured Store, not a different virtual return.
   private requireMigrationStore(...methods: MigrationStoreKey[]): RuntimeStore {

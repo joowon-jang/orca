@@ -29,6 +29,7 @@ export type TaskPageDialogWorkItemKey = {
   id: string
   repoId: string
   url: string
+  repoHostId?: GitHubWorkItem['repoHostId']
 } | null
 
 export type TaskPageRepoSourceState = {
@@ -121,10 +122,6 @@ export function selectTaskPageUnresolvedSourceRepos(
   return unresolved
 }
 
-function taskPageWorkItemCacheKey(item: GitHubWorkItem): string {
-  return `${item.repoId}\u0000${item.id}`
-}
-
 export function reconcileTaskPagePagesWithWorkItemsCache(
   pages: TaskPageWorkItemPages,
   entries: readonly (CacheEntry<readonly GitHubWorkItem[]> | undefined)[]
@@ -132,7 +129,7 @@ export function reconcileTaskPagePagesWithWorkItemsCache(
   const cachedItems = new Map<string, GitHubWorkItem>()
   for (const entry of entries) {
     for (const item of entry?.data ?? []) {
-      cachedItems.set(taskPageWorkItemCacheKey(item), item)
+      cachedItems.set(taskPageWorkItemKey(item), item)
     }
   }
 
@@ -143,7 +140,7 @@ export function reconcileTaskPagePagesWithWorkItemsCache(
     }
     let pageChanged = false
     const nextPage = page.map((item) => {
-      const cached = cachedItems.get(taskPageWorkItemCacheKey(item))
+      const cached = cachedItems.get(taskPageWorkItemKey(item))
       if (!cached || cached === item) {
         return item
       }
@@ -244,7 +241,9 @@ export function findTaskPageDialogWorkItem(
       (wi) =>
         wi.id === dialogWorkItemKey.id &&
         wi.repoId === dialogWorkItemKey.repoId &&
-        wi.url === dialogWorkItemKey.url
+        wi.url === dialogWorkItemKey.url &&
+        // Why: a twin's other host caches the same PR; its copy routes edits to that host.
+        (!dialogWorkItemKey.repoHostId || wi.repoHostId === dialogWorkItemKey.repoHostId)
     )
     if (found) {
       return found

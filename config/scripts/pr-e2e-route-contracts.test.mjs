@@ -516,7 +516,11 @@ describe('managed-SSH remote sources routing', () => {
       // #30047 and #30060: sidebar sleep and project removal.
       'src/renderer/src/components/sidebar/sleep-worktree-flow.ts',
       'src/renderer/src/components/sidebar/ssh-host-remove-resolution.ts',
-      'src/renderer/src/store/repos/repo-removal.ts'
+      'src/renderer/src/store/repos/repo-removal.ts',
+      // #30775: the pane banner for a managed server that refused this desktop.
+      'src/renderer/src/components/terminal-pane/TerminalRemoteRuntimeReconnectBanner.tsx',
+      'src/renderer/src/components/terminal-pane/use-managed-pairing-refused.ts',
+      'src/renderer/src/components/terminal-pane/TerminalPaneRuntimePortals.tsx'
     ]) {
       expect(existsSync(join(projectDir, file)), file).toBe(true)
       expect(selectsManagedSshLane(file), file).toBe(true)

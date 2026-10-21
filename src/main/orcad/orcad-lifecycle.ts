@@ -1,5 +1,6 @@
 import { setRuntimeBrowserCommandsFactory } from '../runtime/runtime-browser-commands-factory'
 import { setDesktopBrowserBridgeHostEnabled } from '../runtime/desktop-browser-bridge/desktop-browser-bridge-registry'
+import { ORCAD_MANAGED_ACTIVATION_ROOT_ENV } from '../../shared/orcad-managed-launch-env'
 import { startOrcadBrowserProvider } from './orcad-browser-startup'
 import { OrcadRuntimeLifetime, type OrcadRuntimeCleanup } from './orcad-runtime-lifetime'
 import type { OrcadManagedStopInstance } from '../../shared/orcad-stop-request'
@@ -144,8 +145,9 @@ export async function startOrcadWithHost<T extends object>(
       admission = acquireProfileStateRuntimeAdmission(userDataPath)
       // Why not awaited: a desktop sidecar's authorization UI must not hold RPC readiness hostage.
       browserProvider = startOrcadBrowserProvider({ userDataPath })
-      // Why: orcad has no desktop browser, so an opted-in desktop may serve this host's CLI.
-      setDesktopBrowserBridgeHostEnabled(true)
+      // Why managed only: a desktop opts in per SSH host, so a server the user started has no
+      // bridge to wait for; its CLI's browser commands go to the paired desktop hosting its pages.
+      setDesktopBrowserBridgeHostEnabled(Boolean(process.env[ORCAD_MANAGED_ACTIVATION_ROOT_ENV]))
       return { ...(await start(registerCleanup)), instance }
     },
     async (runtimeCleanupSucceeded) => {

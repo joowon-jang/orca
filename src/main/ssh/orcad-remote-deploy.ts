@@ -26,7 +26,10 @@ import { ORCAD_STARTUP_READINESS_TIMEOUT_MS } from '../../shared/orcad-profile-p
 import { materializeOrcadArtifact } from '../orcad/orcad-artifact-materializer'
 import { readOrcadBundleTarget } from './orcad-deployment-target'
 import { resolveOrcadRuntimeTarget } from '../managed-server/lifecycle/orcad-runtime-target'
-import { materializeNodeRuntimeArchive } from '../node-runtime/pinned-runtime-materializer'
+import {
+  materializeNodeRuntimeArchive,
+  nodeRuntimeArchiveCachePath
+} from '../node-runtime/pinned-runtime-materializer'
 import {
   orcadActivationFenceExists,
   resolveOrcadActivationReadinessTimeout,
@@ -97,6 +100,8 @@ export async function deployOrcad(
     (input.localOrcadDir
       ? readOrcadBundleTarget(input.localOrcadDir)
       : await resolveOrcadRuntimeTarget(input))
+  const runtimeCacheRoot =
+    input.runtimeCacheRoot ?? join(getAppEnvironment().getPath('userData'), 'orcad-artifacts')
   const options = {
     ...input,
     target,
@@ -105,11 +110,8 @@ export async function deployOrcad(
       ORCAD_STARTUP_READINESS_TIMEOUT_MS
     ),
     nodeRuntimeArchive: () =>
-      materializeNodeRuntimeArchive(
-        target,
-        input.runtimeCacheRoot ?? join(getAppEnvironment().getPath('userData'), 'orcad-artifacts'),
-        { signal: input.signal }
-      ),
+      materializeNodeRuntimeArchive(target, runtimeCacheRoot, { signal: input.signal }),
+    nodeRuntimeOfflineArchivePath: nodeRuntimeArchiveCachePath(target, runtimeCacheRoot),
     localOrcadDir:
       input.localOrcadDir ?? (await materializeOrcadArtifact(target, { signal: input.signal }))
   }

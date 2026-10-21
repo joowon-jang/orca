@@ -169,6 +169,10 @@ export const AGENT_SESSION_QUEUED_MESSAGES_RUNTIME_CAPABILITY =
 // A client offers Edit only when the host advertises it; there is no copy-and-delete fallback.
 export const AGENT_SESSION_QUEUED_MESSAGE_EDIT_RUNTIME_CAPABILITY =
   'agent-session.queued-message-edit.v1' as const
+// Why: `agentSession.queuedMessageUpdate`'s params are strict, so an older host rejects `images`.
+// A host advertising this replaces a queued card's image set on Save; otherwise Save is text only.
+export const AGENT_SESSION_QUEUED_MESSAGE_IMAGE_EDIT_RUNTIME_CAPABILITY =
+  'agent-session.queued-message-image-edit.v1' as const
 // Why: a client advertising this shows a queued card's images and edits its text in place, keeping
 // them. Released readers show only a card's text and edit by copying it and deleting the card, which
 // would drop the images, so the host publishes no card holding an image to a reader without it.
@@ -188,6 +192,9 @@ export const CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY =
 // older host leaves the message rail on loaded messages instead of answering method_not_found.
 export const AGENT_SESSION_CONVERSATION_OUTLINE_RUNTIME_CAPABILITY =
   'agent-session.conversation-outline.v1' as const
+// Why: agentSession.item is additive; a client probes this before offering "Show full output" so an
+// older host, whose rows keep only a head, is never asked for more.
+export const AGENT_SESSION_ITEM_DETAIL_RUNTIME_CAPABILITY = 'agent-session.item-detail.v1' as const
 // The RPC is registered unconditionally; per-session rewind support is a separate check.
 export const AGENT_SESSION_REWIND_RUNTIME_CAPABILITY = 'agent-session.rewind.v1' as const
 // Why: the rewind UI relies on the next send settling an in-doubt rewind, even with the agent up.

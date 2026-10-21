@@ -27,7 +27,7 @@ export function TerminalPaneResumeInChatButton({
   const pending = useCliChatResumePending(source)
   const label = translate(
     'components.tab.bar.SortableTabContextMenu.switchToChatView',
-    'Switch to Chat'
+    'Switch to Chat UI'
   )
 
   return (

@@ -88,14 +88,14 @@ export function resolveManagedTunnelBinding(
   const targetStore = dependencies.getTargetStore()
   const connectionManager = dependencies.getConnectionManager()
   if (!targetStore || !connectionManager) {
-    throw new Error('SSH is unavailable on this client; the managed Orca server is unverifiable.')
+    throw new Error('SSH is unavailable on this client; this host’s Orca server is unverifiable.')
   }
   const target = targetStore.getTarget(deployment.sshTargetId)
   if (!target || target.generation !== deployment.sshTargetGeneration) {
-    throw new Error('The SSH registration for this managed Orca server was removed or re-created.')
+    throw new Error('The SSH registration for this host’s Orca server was removed or re-created.')
   }
   if (getManagedOrcadFenceEnvironmentId(target) !== environment.id) {
-    throw new Error('The SSH target is no longer owned by this managed Orca server.')
+    throw new Error('The SSH target is no longer owned by this host’s Orca server.')
   }
   return { deployment, targetStore, connectionManager, target }
 }

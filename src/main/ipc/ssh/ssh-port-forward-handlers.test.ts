@@ -49,6 +49,8 @@ describe('ssh:updatePortForward', () => {
       PortForwardTornDownError
     )
     expect(h.persist).not.toHaveBeenCalled()
+    // The renderer still drops the row the edit closed.
+    expect(h.broadcast).toHaveBeenCalled()
   })
 
   it('resyncs saved forwards after an ordinary failed edit', async () => {

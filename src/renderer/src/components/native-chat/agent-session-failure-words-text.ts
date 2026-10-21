@@ -46,6 +46,13 @@ const PIECES: Record<AgentSessionFailureCopyId, (values: AgentSessionFailureCopy
         COPY.couldNotRestart,
         values
       ),
+    startTimedOut: (values) =>
+      translate('components.native-chat.failureWords.startTimedOut', COPY.startTimedOut, values),
+    startTimedOutKeepsHappening: () =>
+      translate(
+        'components.native-chat.failureWords.startTimedOutKeepsHappening',
+        COPY.startTimedOutKeepsHappening
+      ),
     argumentsUnsupportedOption: (values) =>
       translate(
         'components.native-chat.failureWords.argumentsUnsupportedOption',

@@ -8,7 +8,10 @@ import {
   createPopupIdentityProbeRoot,
   launchPopupIdentityProbe
 } from './popup-identity-electron-probe'
-import { startHiddenRendererFrameCapture } from './hidden-renderer-frame-capture-fixture'
+import {
+  HIDDEN_RENDERER_FIRST_FRAME_TIMEOUT_MS,
+  startHiddenRendererFrameCapture
+} from './hidden-renderer-frame-capture-fixture'
 
 type OriginProbeWindow = Window & { originProbeChild?: Window }
 
@@ -138,9 +141,11 @@ beforeAll(async () => {
   }
   page = found
   stopCapture = await startHiddenRendererFrameCapture(page, (hasFrame) =>
-    vi.waitFor(() => expect(hasFrame()).toBe(true), { timeout: 10_000 })
+    vi.waitFor(() => expect(hasFrame()).toBe(true), {
+      timeout: HIDDEN_RENDERER_FIRST_FRAME_TIMEOUT_MS
+    })
   )
-}, 60_000)
+}, 90_000)
 
 afterAll(async () => {
   for (const response of held) {

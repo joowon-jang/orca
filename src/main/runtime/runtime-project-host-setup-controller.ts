@@ -41,6 +41,7 @@ import {
   assertWslMoveHostSetupWritable,
   assertWslMoveReposWritable
 } from '../persistence/moving-wsl-projects/wsl-move-scope-guard'
+import { runtimeVisibleProjectHostSetups } from './runtime-visible-catalog'
 import {
   findProjectHostSetup,
   type ProjectHostSetupTarget
@@ -100,6 +101,11 @@ export class RuntimeProjectHostSetupController {
 
   listSetups(): ProjectHostSetup[] {
     return this.deps.getStore()?.getProjectHostSetups?.() ?? []
+  }
+
+  /** What clients may list; internal lookups keep the full store, as `listSetups` does. */
+  listVisibleSetups(): ProjectHostSetup[] {
+    return runtimeVisibleProjectHostSetups(this.deps.getStore())
   }
 
   createSetup(args: ProjectHostSetupCreateArgs): ProjectHostSetupCreateResult {

@@ -53,7 +53,10 @@ function setup(options: { publishesPort?: boolean } = {}) {
     orcadFence: { environmentId: 'environment-1' }
   }
   // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: a test double for the members the tunnel manager calls.
-  const connection = { getConnectGeneration: () => 3 } as unknown as SshConnection
+  const connection = {
+    getConnectGeneration: () => 3,
+    isDisposed: () => false
+  } as unknown as SshConnection
   const forwardedTo = new Map<string, number>()
   const provider: SshPortForwardProvider = {
     canHandle: () => true,

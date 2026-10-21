@@ -1,4 +1,5 @@
 export const LINUX_PACKAGE_TESTS = [
+  'config/scripts/packaged-cloud-source-exclusion.test.mjs',
   'src/main/browser/popup-origin-chrome.electron.test.ts',
   'src/main/browser/browser-link-materialization.electron.test.ts',
   'src/main/browser/browser-client-page-renderer-lifecycle.electron.test.ts',
@@ -78,5 +79,6 @@ export const WINDOWS_PACKAGE_TESTS = [
   'src/main/ipc/pty-spawn-env-codex-resume-provenance.test.ts',
   'src/main/ipc/preflight-provider-command-selection.test.ts',
   'src/main/ipc/preflight-runnable-local-cli.test.ts',
-  'src/main/managed-server/install/remote-node-runtime-store-windows.test.ts'
+  'src/main/managed-server/install/remote-node-runtime-store-windows.test.ts',
+  'src/main/skills/skill-windows-rename-contention.integration.test.ts'
 ]

@@ -33,6 +33,7 @@ import {
 import { commandRefusedByReason } from './agent-session-command-refusal-words'
 import { attachmentProblemSentence } from './agent-session-attachment-failure-words'
 import { joinSentences } from './sentence-joining'
+import { requestTimeoutSeconds } from './agent-session-request-timeout'
 import {
   DISPATCH_REJECTED_CANCELLED,
   DISPATCH_REJECTED_CODEX_QUEUE_FULL,
@@ -150,6 +151,18 @@ function couldNot(verb: 'couldNotStart' | 'couldNotRestart'): Sentence {
         say(problemCopy[fact.argumentProblem.problem], { option: fact.argumentProblem.option }),
         say('editSavedArguments'),
         ...startRetry(say, context)
+      ])
+    }
+    if (fact.requestTimeout) {
+      return joinSentences([
+        say('startTimedOut', {
+          ...agent(say, context),
+          method: fact.requestTimeout.method,
+          seconds: requestTimeoutSeconds(fact.requestTimeout)
+        }),
+        ...startRetry(say, context),
+        // No cause named: MCP startup, the network or config can stall a start too.
+        say('startTimedOutKeepsHappening')
       ])
     }
     // Only a terminal agent an older build recorded holds a claim; quitting it frees the chat.

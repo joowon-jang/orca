@@ -5,7 +5,10 @@ import {
   assertEditorBufferInvariant,
   withEditorBufferRecords
 } from './editor-buffer-record-lifecycle'
-import type { EditorBufferRecords } from './slices/editor/buffers/editor-buffer-record'
+import {
+  adoptMirroredEditorBuffers,
+  type EditorBufferRecords
+} from './slices/editor/buffers/editor-buffer-record'
 import type { OpenFile } from './slices/editor/types/open-file'
 import { folderWorkspaceKey } from '../../../shared/workspace-scope'
 
@@ -204,6 +207,27 @@ describe('editor buffer records', () => {
       isDirty: true,
       externalMutation: 'changed'
     })
+  })
+
+  it("adopts a host republish of a mirrored tab's buffer state, as remote session sync writes it", () => {
+    const id = openEditTab()
+    const republish = (mirroredFromRuntimeSession: true | undefined): void =>
+      useAppStore.setState((state) => {
+        const openFiles = state.openFiles.map((file) =>
+          file.id === id ? { ...file, isDirty: !file.isDirty, mirroredFromRuntimeSession } : file
+        )
+        return {
+          openFiles,
+          editorBuffers: adoptMirroredEditorBuffers(state.editorBuffers, openFiles)
+        }
+      })
+
+    // Why: only host-owned tabs adopt; a local tab's buffer state is written through its record.
+    expect(() => republish(undefined)).toThrow(/"isDirty" of/)
+    republish(true)
+
+    expect(useAppStore.getState().editorBuffers[id]?.isDirty).toBe(true)
+    expect(fileOf(id)?.isDirty).toBe(true)
   })
 
   it('rejects a slice write that changes a mirror field without its record', () => {

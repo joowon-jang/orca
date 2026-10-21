@@ -3,11 +3,10 @@ import { waitForSessionReady } from './helpers/store'
 
 test.use({ seedTestRepo: false })
 
-test('global Auto applies to supporting agents, other agents switch separately, and it persists', async ({
+test('global Auto syncs native defaults only for supporting agents and persists', async ({
   orcaPage
 }) => {
   await waitForSessionReady(orcaPage)
-  // Terminal permission changes must leave the native chat default alone.
   await orcaPage.evaluate(() => {
     const store = window.__store
     if (!store) {
@@ -26,7 +25,10 @@ test('global Auto applies to supporting agents, other agents switch separately, 
         claude: settings.agentDefaultArgs?.claude,
         codex: settings.agentDefaultArgs?.codex,
         gemini: settings.agentDefaultArgs?.gemini,
-        native: settings.nativeChatPermissionMode
+        native: settings.nativeChatPermissionMode,
+        claudeNative: settings.agentNativeChatPermissionModes?.claude,
+        codexNative: settings.agentNativeChatPermissionModes?.codex,
+        grokNative: settings.agentNativeChatPermissionModes?.grok
       }
     })
 
@@ -45,7 +47,10 @@ test('global Auto applies to supporting agents, other agents switch separately, 
     claude: '--permission-mode auto',
     codex: '--approve-for-me',
     gemini: '--yolo',
-    native: 'accept-edits'
+    native: 'full-access',
+    claudeNative: 'auto',
+    codexNative: 'auto',
+    grokNative: undefined
   })
 
   await others.getByRole('radio', { name: 'Manual', exact: true }).click()
@@ -53,7 +58,10 @@ test('global Auto applies to supporting agents, other agents switch separately, 
     claude: '--permission-mode auto',
     codex: '--approve-for-me',
     gemini: '',
-    native: 'accept-edits'
+    native: 'full-access',
+    claudeNative: 'auto',
+    codexNative: 'auto',
+    grokNative: 'ask'
   })
 
   await orcaPage.reload()
@@ -68,7 +76,21 @@ test('global Auto applies to supporting agents, other agents switch separately, 
     'aria-checked',
     'true'
   )
+  await expect.poll(readArgs).toMatchObject({
+    native: 'full-access',
+    claudeNative: 'auto',
+    codexNative: 'auto',
+    grokNative: 'ask'
+  })
 
   await group.getByRole('radio', { name: 'Manual', exact: true }).click()
-  await expect.poll(readArgs).toEqual({ claude: '', codex: '', gemini: '', native: 'accept-edits' })
+  await expect.poll(readArgs).toEqual({
+    claude: '',
+    codex: '',
+    gemini: '',
+    native: 'ask',
+    claudeNative: undefined,
+    codexNative: undefined,
+    grokNative: undefined
+  })
 })

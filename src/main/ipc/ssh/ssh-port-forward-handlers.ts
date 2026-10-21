@@ -75,11 +75,10 @@ export function registerSshPortForwardHandlers(): void {
         return entry
       } catch (err) {
         // Why: a Disconnect emptied the runtime list; saving it would erase the target's forwards.
-        if (err instanceof PortForwardTornDownError) {
-          throw err
+        if (!(err instanceof PortForwardTornDownError)) {
+          persistPortForwards(args.targetId)
         }
         // Why: edit/rollback may have failed, so resync renderer to actual runtime state.
-        persistPortForwards(args.targetId)
         broadcastPortForwards(getCurrentMainWindow, args.targetId)
         throw err
       }
