@@ -1,7 +1,6 @@
-// Main's operations as the window draws them from their records frames (design E2a): each shows
-// from the store's own view, without reading the window's session back, and leaves the store as
-// the full build does (the apply check, installed below).
+// Draw main operations from records frames using store view without session read-back; apply checker requires full-build parity (E2a).
 
+import { NO_HELD_TABS } from '@/store/workspace-layout-frame-held-tabs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as AgentStatusModule from '@/lib/agent-status'
 import { applyLayoutCommand } from '../../../shared/workspace-layout/workspace-layout-commands'
@@ -25,6 +24,7 @@ import {
   layoutFrameApplyErrors
 } from './workspace-layout-frame-apply-check.test-fixture'
 import { openWorkspaceLayoutFrameSync } from './workspace-layout-frame-sync'
+import { withMovedTabsSelected } from '@/store/slices/tabs/moved-tab-selection'
 
 vi.mock('sonner', () => ({ toast: { info: vi.fn(), success: vi.fn(), error: vi.fn() } }))
 vi.mock('@/lib/agent-status', async (importOriginal) => {
@@ -139,7 +139,6 @@ describe('main’s operations drawn record by record', () => {
 
     expect(check.fullBuilt).toEqual([])
     expect(check.workspaceBuilt).toEqual([GIT_KEY])
-    // Presence: the frame changed what the store shows.
     expect(store.getState()).not.toBe(before)
     close()
   })
@@ -227,7 +226,9 @@ describe('the apply check on a flush that built one workspace in full', () => {
         changed: [GIT_KEY, 'repo-other::/elsewhere'],
         fullBuilt: ['repo-other::/elsewhere'],
         workspaceBuilt: [GIT_KEY],
-        rowFieldsTaken: new Map()
+        rowFieldsTaken: new Map(),
+        held: NO_HELD_TABS,
+        selectTakenMovedTabs: (state) => state
       })
     // Precondition: the store as booted is what the full build shows.
     expect(observe(shown)).toEqual([])
@@ -243,6 +244,35 @@ describe('the apply check on a flush that built one workspace in full', () => {
       }
     }
     expect(observe(wrong)).toEqual([expect.stringContaining('unifiedTabsByWorktree')])
+    close()
+  })
+
+  it('expects the moved tab the flush selected, so a flush that did not select it fails', async () => {
+    const { store, close } = await boot()
+    const shown = store.getState()
+    const cache = publishedLayoutsOf(loadMainLayoutModel('local', localDesktopSession()))
+    const moved = { worktreeId: GIT_KEY, tabId: 'tab-unbound', fromGroupId: 'gone', selection: '' }
+    const observe = (after: typeof shown) =>
+      layoutFrameApplyErrors({
+        before: shown,
+        after,
+        cache,
+        changed: [GIT_KEY, 'repo-other::/elsewhere'],
+        fullBuilt: ['repo-other::/elsewhere'],
+        workspaceBuilt: [GIT_KEY],
+        rowFieldsTaken: new Map(),
+        held: NO_HELD_TABS,
+        selectTakenMovedTabs: (state) => withMovedTabsSelected(state, [moved])
+      })
+    // Precondition: the flush's selection changes what the workspace shows.
+    expect(shown.activeGroupIdByWorktree[GIT_KEY]).not.toBe(
+      shown.unifiedTabsByWorktree[GIT_KEY]!.find((tab) => tab.id === 'tab-unbound')!.groupId
+    )
+
+    expect(observe(withMovedTabsSelected(shown, [moved]))).toEqual([])
+    expect(observe(shown)).toEqual(
+      expect.arrayContaining([expect.stringContaining('activeGroupIdByWorktree')])
+    )
     close()
   })
 })

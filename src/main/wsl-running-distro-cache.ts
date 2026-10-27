@@ -1,15 +1,14 @@
 import { wslDistroListRetryDelayMs } from './wsl-distro-retry'
 
-// Why: `listRunningWslDistrosAsync` polls on a 2s timer for as long as any WSL transcript
-// tab is open (see wsl-transcript-running-observer.ts). Without a last-known-good fallback
-// and backoff mirroring the full distro-list cache in wsl.ts, a persistently broken
-// wsl.exe would make every WSL session vanish app-wide with no signal distinguishing
-// "discovery broken" from "distro stopped", and would re-spawn wsl.exe every 2s forever.
+// Preserve last-known-good state and back off failed discovery so sessions survive a persistent wsl.exe outage.
 let cache: string[] | null = null
 let retryAfterMs = 0
 let failureStreak = 0
 type RunningDistroObservation = { distros: string[]; confirmed: boolean }
 let inFlightProbe: Promise<RunningDistroObservation> | null = null
+// Monotonic start of the in-flight probe, and one probe chained after it for callers it predates.
+let inFlightStartedAt = 0
+let chainedProbe: Promise<RunningDistroObservation> | null = null
 type RunningDistroStopListener = (stopped: string[], running: string[]) => void
 const stopListeners = new Set<RunningDistroStopListener>()
 
@@ -69,19 +68,13 @@ function armRetryAfterFailure(): void {
   retryAfterMs = now + wslDistroListRetryDelayMs(failureStreak)
 }
 
-/**
- * Runs `probe` unless another probe is already in flight (shares its result) or a prior
- * failure's retry window is still open (falls back to the last-known-good list instead).
- * A successful probe — including a genuine empty result, i.e. no distros running — is
- * authoritative and replaces the cache; only a probe *failure* (thrown/rejected) falls
- * back to the cache and arms backoff. Bounds wsl.exe spawns under both IPC fan-out and a
- * broken/degraded host.
- */
+/** Share probes; only failures use stale cache/backoff. A confirmed empty result means no running distros. */
 export async function resolveRunningWslDistros(
   probe: () => Promise<string[]>,
-  options: { requireConfirmed?: boolean } = {}
+  /** `startedAfter` (performance.now()): only a probe started later may answer, e.g. after an exit. */
+  options: { requireConfirmed?: boolean; startedAfter?: number } = {}
 ): Promise<string[]> {
-  const observation = await observeRunningWslDistros(probe)
+  const observation = await observeRunningWslDistros(probe, options.startedAfter)
   if (options.requireConfirmed && !observation.confirmed) {
     throw new Error('WSL running-distro discovery is unavailable. Retry when WSL is reachable.')
   }
@@ -89,14 +82,24 @@ export async function resolveRunningWslDistros(
 }
 
 function observeRunningWslDistros(
-  probe: () => Promise<string[]>
+  probe: () => Promise<string[]>,
+  startedAfter?: number
 ): Promise<RunningDistroObservation> {
-  if (inFlightProbe) {
+  if (inFlightProbe && (startedAfter === undefined || inFlightStartedAt > startedAfter)) {
     return inFlightProbe
+  }
+  if (inFlightProbe) {
+    // The in-flight probe predates what this caller must see: one fresh probe follows it, shared.
+    chainedProbe ??= inFlightProbe.then(() => {
+      chainedProbe = null
+      return observeRunningWslDistros(probe)
+    })
+    return chainedProbe
   }
   if (Date.now() < retryAfterMs) {
     return Promise.resolve({ distros: cache ?? [], confirmed: false })
   }
+  inFlightStartedAt = performance.now()
   const result = probe()
     .then((distros) => {
       const previous = cache
@@ -121,9 +124,15 @@ function observeRunningWslDistros(
   return result
 }
 
+/** Last confirmed running list without probing; null before any probe has succeeded. */
+export function peekConfirmedRunningWslDistros(): readonly string[] | null {
+  return cache
+}
+
 export function _resetRunningWslDistroCacheForTests(): void {
   cache = null
   retryAfterMs = 0
   failureStreak = 0
   inFlightProbe = null
+  chainedProbe = null
 }

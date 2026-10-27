@@ -3,7 +3,10 @@
 
 import type { RuntimeEnvironmentStatus } from '../../../shared/runtime-host-status'
 import type { RuntimeMobileSessionTabsResult, RuntimeStatus } from '../../../shared/runtime-types'
-import { LAYOUT_INTENTS_RUNTIME_CAPABILITY } from '../../../shared/workspace-layout/layout-intents-capability'
+import {
+  LAYOUT_INTENTS_RUNTIME_CAPABILITY,
+  LAYOUT_REOPEN_HELD_PANES_CAPABILITY
+} from '../../../shared/workspace-layout/layout-intents-capability'
 import type {
   PublishedTab,
   PublishedWorkspaceLayout
@@ -13,6 +16,7 @@ import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
 import type { AppState } from '@/store/types'
 import type { RuntimeLayoutStreamStatus } from './runtime-layout-client'
 import type { PublicKnownRuntimeEnvironment } from '../../../shared/runtime-environments'
+import { publicRuntimeEnvironment } from './paired-runtime-environment-test-fixture'
 import { createTestStore } from '../store/slices/store-test-helpers'
 import { installServerLayoutFrames } from './server-layout-frames'
 import { applyWebSessionTabsSnapshotWithContext } from './web-session-tabs-sync/apply-snapshot'
@@ -94,7 +98,8 @@ export function serverLayout(tabs: PublishedTab[]): PublishedWorkspaceLayout {
 export function runtimeStatusEntry(
   runtimeId: string,
   capable: boolean,
-  disconnected = false
+  disconnected = false,
+  reopensHeldPanes = false
 ): RuntimeEnvironmentStatus {
   const status: RuntimeStatus = {
     runtimeId,
@@ -103,7 +108,14 @@ export function runtimeStatusEntry(
     authoritativeWindowId: null,
     liveTabCount: 0,
     liveLeafCount: 0,
-    ...(capable ? { capabilities: [LAYOUT_INTENTS_RUNTIME_CAPABILITY] } : {})
+    ...(capable
+      ? {
+          capabilities: [
+            LAYOUT_INTENTS_RUNTIME_CAPABILITY,
+            ...(reopensHeldPanes ? [LAYOUT_REOPEN_HELD_PANES_CAPABILITY] : [])
+          ]
+        }
+      : {})
   }
   if (!disconnected) {
     return { status, checkedAt: 1 }
@@ -131,17 +143,7 @@ export function runtimeEnvironment(
   runtimeId: string,
   pairingRevision: number
 ): PublicKnownRuntimeEnvironment {
-  return {
-    id,
-    name: id,
-    createdAt: 1,
-    updatedAt: 1,
-    pairingRevision,
-    lastUsedAt: null,
-    runtimeId,
-    endpoints: [{ id: 'ws-1', kind: 'websocket', label: 'WebSocket', endpoint: 'ws://server' }],
-    preferredEndpointId: 'ws-1'
-  }
+  return publicRuntimeEnvironment({ id, runtimeId, pairingRevision })
 }
 
 type MirrorStore = {
@@ -238,6 +240,8 @@ export type Server = {
   capable: boolean
   /** Paired still, but the host's own verdict is that the pairing is over. */
   disconnected?: boolean
+  /** Also serves `layout.reopenHeldPanes`. */
+  reopensHeldPanes?: boolean
 }
 
 export const CAPABLE: Server = { environmentId: ENV, runtimeId: 'runtime-1', capable: true }
@@ -262,7 +266,12 @@ export function createServerHarness(mocks: { owners: Map<string, string> }) {
         runtimeStatusByEnvironmentId: new Map(
           servers.map((server) => [
             server.environmentId,
-            runtimeStatusEntry(server.runtimeId, server.capable, server.disconnected)
+            runtimeStatusEntry(
+              server.runtimeId,
+              server.capable,
+              server.disconnected,
+              server.reopensHeldPanes
+            )
           ])
         )
       })

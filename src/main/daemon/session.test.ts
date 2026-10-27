@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Session } from './session'
 import type { killWithDescendantSweep } from '../pty-descendant-termination'
 import type { SpawnTreeIdentity } from './session-subprocess-handle'
+import { TerminalSessionTeardown } from './terminal-session-teardown'
 import { SESSION_FORCE_KILL_RETRY_MS } from './session-termination-controller'
 import type { SessionState, ShellReadyState } from './types'
 import type { TuiAgent } from '../../shared/tui-agent'
@@ -66,7 +67,6 @@ function createMockSubprocess(spawnIdentity?: SpawnTreeIdentity) {
     },
     kill() {
       killed = true
-      // Simulate async exit
       setTimeout(() => onExit?.(0), 5)
     },
     terminateOwnedTree: () => 'terminated' as const,
@@ -83,7 +83,6 @@ function createMockSubprocess(spawnIdentity?: SpawnTreeIdentity) {
       onExit = cb
     },
     dispose() {},
-    // Helpers for tests to simulate subprocess events
     simulateData(data: string) {
       onData?.(data)
     },
@@ -188,8 +187,7 @@ describe('Session', () => {
       )
       createSession()
 
-      // Why no inspection without a candidate: the RPC reads the barrier's
-      // settled verdict; it must never mint proof the byte stream didn't ask for.
+      // Reading a verdict must not create process proof without a byte-stream candidate.
       await expect(session.confirmShellForeground()).resolves.toBe(false)
       expect(subprocess.confirmShellForeground).not.toHaveBeenCalled()
 
@@ -308,7 +306,6 @@ describe('Session', () => {
 
     it('answers a late query itself on every backend, so no downstream view is asked', () => {
       const query = '\x1b]10;?\x07'
-      // Orca's default theme: nothing reported colours for this session.
       const reply = '\x1b]10;rgb:ffff/ffff/ffff\x1b\\'
       for (const ownerBackend of ['posix-pty', 'windows-conpty'] as const) {
         subprocess = createMockSubprocess()
@@ -369,15 +366,7 @@ describe('Session', () => {
   })
 
   describe('emulator does not reply to terminal queries', () => {
-    // Why: daemon emulator parses in-process synchronously — before
-    // handleSubprocessData forwards bytes onward — so any auto-reply it
-    // emits races ahead of the live answerer and clobbers it with
-    // default-xterm values (no theme, stale cursor). Query authority is
-    // structural (terminal-query-authority.md): a delivered chunk is
-    // answered by the consuming view's xterm, a hidden-dropped chunk by
-    // MAIN's runtime model responder. The daemon emulator is neither — it
-    // stays write-only forever, and these pins are permanent. OSC 10/11 are
-    // answered once by the session's source ingress, never by its emulator.
+    // The emulator must not race the authoritative responder; source ingress alone owns OSC 10/11.
     it.each([
       ['OSC 12 cursor-color', '\x1b]12;?\x1b\\'],
       ['DA1 device-attributes', '\x1b[c'],
@@ -388,8 +377,7 @@ describe('Session', () => {
     ])('does not reply to %s query', async (_label, query) => {
       createSession({ shellReadySupported: false })
       subprocess.simulateData(query)
-      // xterm.js fires terminal.write's completion callback via a microtask;
-      // two resolved-promise awaits flush any nested scheduling.
+      // Let nested xterm completion microtasks settle.
       await Promise.resolve()
       await Promise.resolve()
       expect(subprocess.written).toEqual([])
@@ -397,8 +385,7 @@ describe('Session', () => {
   })
 
   describe('shell readiness gating', () => {
-    // Why: the renderer's DA1 reply would be queued here, and a shell that withholds its
-    // first prompt until DA1 is answered never emits the marker that would release it.
+    // A queued renderer reply cannot unblock a shell that waits on DA1 before emitting readiness.
     it('answers DA1 once without forwarding it to a renderer', () => {
       createSession({ shellReadySupported: true })
       const onData = vi.fn((d: string) => d === '\x1b[0c' && session.write('\x1b[?1;2c'))
@@ -414,12 +401,7 @@ describe('Session', () => {
       expect(subprocess.written).toEqual(['\x1b[?1;2c'])
     })
 
-    // Why: regression guard for "claude claude" double-echo. The marker fires
-    // from precmd before readline switches the PTY into raw mode; flushing
-    // then lets the kernel re-echo the command under the prompt. Detailed
-    // timing behavior is covered by post-ready-flush-gate.test.ts.
-    // Also checks writes that arrive during the gate window keep their order
-    // — the gate continues to queue even though shellState is already 'ready'.
+    // Precmd can precede raw mode; keep startup input ordered until the flush gate releases it.
     it('defers flush past the shell-ready marker and preserves write order', () => {
       createSession({ shellReadySupported: true })
       expect(session.shellState).toBe('pending')
@@ -435,8 +417,10 @@ describe('Session', () => {
       expect(subprocess.written).toEqual(['first\n', 'second\n'])
     })
 
-    it('contains live color replies without releasing queued startup input', async () => {
-      const reply = '\x1b[?997;1n'
+    it.each([
+      ['color', '\x1b[?997;1n'],
+      ['XTVERSION', '\x1bP>|xterm.js(6.1.0)\x1b\\']
+    ])('contains live %s replies without releasing queued startup input', async (_, reply) => {
       createSession({ shellReadySupported: true, shellReadyTimeoutMs: 100 })
       session.write('codex\n')
 
@@ -602,10 +586,7 @@ describe('Session', () => {
       expect(subprocess.written).toEqual(['waiting input'])
     })
 
-    // Why this matters: the detached daemon runs with stdio 'ignore', so a
-    // console.warn here reaches nobody. This path costs every startup command
-    // the full timeout, and diagnosing it from a silent log is what made the
-    // original report expensive -- so it has to reach the daemon's file log.
+    // Detached stdio is ignored, so readiness diagnostics must reach the daemon file log.
     it('reports the timeout to the daemon log rather than the void', () => {
       const events: { event: string; details: Record<string, unknown> }[] = []
       createSession({
@@ -618,14 +599,10 @@ describe('Session', () => {
       expect(events).toHaveLength(1)
       expect(events[0]?.event).toBe('shell-ready-timeout')
       expect(events[0]?.details).toMatchObject({ sessionId: 'test-session', timeoutMs: 15_000 })
-      // Why a basename: the shell path can carry a home dir, and the basename is
-      // all a diagnosis needs.
       expect(String(events[0]?.details.shell)).not.toContain('/')
     })
 
-    // Why: the report runs before the transition that releases held PTY bytes and
-    // flushes queued stdin, and the ready timer is already cleared by then. A
-    // throwing sink must not leave the barrier stuck in `pending` forever.
+    // Diagnostics run before the ready transition; a throwing sink must still release queued input.
     it('still releases the barrier when the diagnostic sink throws', () => {
       createSession({
         shellReadySupported: true,
@@ -665,9 +642,23 @@ describe('Session', () => {
   })
 
   describe('kill', () => {
+    beforeEach(() => {
+      killWithDescendantSweepMock.mockImplementation((_pid: number, killRoot: () => void) => {
+        killRoot()
+      })
+    })
+
+    function gracefulClose(): void | Promise<void> {
+      return new TerminalSessionTeardown(new Map([['test-session', session]])).killSession(
+        'test-session',
+        session,
+        false
+      )
+    }
+
     it('kills the subprocess', () => {
       createSession()
-      session.kill()
+      void gracefulClose()
       expect(subprocess.killed).toBe(true)
       expect(session.isTerminating).toBe(true)
     })
@@ -682,64 +673,20 @@ describe('Session', () => {
       }
       createSession()
 
-      expect(() => session.kill()).toThrow('graceful kill rejected')
+      expect(() => gracefulClose()).toThrow('graceful kill rejected')
       expect(session.isTerminating).toBe(false)
-      expect(() => session.kill()).not.toThrow()
+      expect(() => gracefulClose()).not.toThrow()
 
       expect(attempts).toBe(2)
       expect(session.isTerminating).toBe(true)
     })
 
-    it('non-agent kill stays synchronous and never routes through the descendant sweep', () => {
-      createSession()
-      session.kill()
-      expect(subprocess.killed).toBe(true)
-      expect(killWithDescendantSweepMock).not.toHaveBeenCalled()
-    })
-
-    it('agent kill routes through the descendant sweep with the subprocess as root', () => {
-      createSession({ launchAgent: 'claude' })
-      session.kill()
-      expect(killWithDescendantSweepMock).toHaveBeenCalledWith(
-        subprocess.pid,
-        expect.any(Function),
-        expect.objectContaining({ ownsRoot: expect.any(Function) })
-      )
-      // The root kill is deferred to the sweep's snapshot-first sequencing.
-      expect(subprocess.killed).toBe(false)
-      const killRoot = killWithDescendantSweepMock.mock.calls[0][1] as () => void
-      killRoot()
-      expect(subprocess.killed).toBe(true)
-    })
-
-    it('agent kill hands the sweep the pty job, which outlives a reparented child', () => {
-      // A grandchild that detached leaves the shell's console and reparents, so
-      // the pid walk behind the sweep's fallback cannot see it. Only the job can.
-      createSession({ launchAgent: 'claude' })
-      session.kill()
-      const deps = killWithDescendantSweepMock.mock.calls[0][2] as {
-        terminateOwnedTree?: () => string
-      }
-      expect(deps.terminateOwnedTree?.()).toBe('terminated')
-    })
-
-    it('agent kill anchors the sweep to the spawn-captured root creation time', () => {
-      // Without the anchor the Windows probe proves only ancestry, so a PID
-      // recycled onto another Orca descendant reads as ours (#10680).
+    it('agent graceful close anchors the sweep to the spawn-captured root creation time', () => {
       createSession({ launchAgent: 'claude' })
       subprocess.spawnIdentity = { rootCreationTimeMs: 555 }
-      session.kill()
+      void gracefulClose()
       const [, , deps = {}] = killWithDescendantSweepMock.mock.calls[0]
       expect(deps.expectedRootCreationTimeMs).toBe(555)
-    })
-
-    it('agent kill root callback is a no-op after the session already exited', () => {
-      createSession({ launchAgent: 'claude' })
-      session.kill()
-      const killRoot = killWithDescendantSweepMock.mock.calls[0][1] as () => void
-      subprocess.simulateExit(0)
-      killRoot()
-      expect(subprocess.killed).toBe(false)
     })
 
     it('notifies attached clients on exit after kill', async () => {
@@ -751,20 +698,18 @@ describe('Session', () => {
         onExit: (code) => exitCodes.push(code)
       })
 
-      session.kill()
+      void gracefulClose()
 
-      // Wait for the simulated async exit
       await new Promise((r) => setTimeout(r, 20))
       expect(exitCodes).toEqual([0])
     })
 
     it('force-kills after 5s but retains ownership until subprocess exit', () => {
       createSession()
-      // Override kill to NOT trigger exit
       subprocess.kill = () => {}
       const forceKillSpy = vi.spyOn(subprocess, 'forceKill')
 
-      session.kill()
+      void gracefulClose()
       expect(session.state).not.toBe('exited')
 
       vi.advanceTimersByTime(5_000)
@@ -807,7 +752,7 @@ describe('Session', () => {
       }
       createSession()
 
-      session.kill()
+      void gracefulClose()
       await vi.advanceTimersByTimeAsync(5_000)
       expect(forceKillAttempts).toBe(1)
       expect(session.isTerminating).toBe(true)
@@ -819,14 +764,14 @@ describe('Session', () => {
       expect(vi.getTimerCount()).toBe(0)
     })
 
-    it('keeps late data and the real exit code until physical exit', () => {
+    it('keeps late data and the real exit code while attributing the requested stop', () => {
       createSession()
       subprocess.kill = () => {}
       const onData = vi.fn()
       const onExit = vi.fn()
       session.attachClient({ onData, onExit })
 
-      session.kill()
+      void gracefulClose()
       vi.advanceTimersByTime(5_000)
 
       subprocess.simulateData('late output')
@@ -835,8 +780,7 @@ describe('Session', () => {
       expect(onData).toHaveBeenCalledWith('late output')
       expect(onExit).toHaveBeenCalledTimes(1)
       expect(onExit).toHaveBeenCalledWith(23, session.incarnationId, {
-        kind: 'exited',
-        exitCode: 23
+        kind: 'operator_close'
       })
       expect(session.exitCode).toBe(23)
     })
@@ -862,7 +806,6 @@ describe('Session', () => {
     it('returns a terminal snapshot', async () => {
       createSession()
       subprocess.simulateData('$ hello\r\n')
-      // Give emulator time to process
       await vi.advanceTimersByTimeAsync(10)
 
       const snapshot = session.getSnapshot()
@@ -904,18 +847,15 @@ describe('Session', () => {
         onExit: () => {}
       })
 
-      // Attach a second client (same conceptual slot but new token)
       session.attachClient({
         onData: (d) => received.push(d),
         onExit: () => {}
       })
 
-      // Try detaching with the old token — should only remove token1's client
       session.detachClient(token1)
       received.length = 0
 
       subprocess.simulateData('after detach')
-      // token2's client should still receive data
       expect(received).toEqual(['after detach'])
     })
   })

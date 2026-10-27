@@ -1,3 +1,4 @@
+import { resolveMobileNativeChatRowProps } from './use-mobile-native-chat-row-props'
 import { createElement, type ReactElement } from 'react'
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, expect, vi } from 'vitest'
@@ -17,6 +18,7 @@ export type Overrides = {
   sendErrorMessage?: string | null
   onClearSendError?: () => void
   inputLockReason?: 'disconnected' | 'waiting' | null
+  composerText?: string
   onSend?: (text: string) => Promise<boolean>
   pending?: Parameters<typeof MobileNativeChatView>[0]['pending']
   structuredActivityUi?: boolean
@@ -29,6 +31,7 @@ export type Overrides = {
   sendSurfaceId?: string
   keyboardInset?: number
   hasMore?: boolean
+  olderPages?: Parameters<typeof MobileNativeChatView>[0]['olderPages']
   onLoadEarlier?: () => void
   status?: Parameters<typeof MobileNativeChatView>[0]['status']
   error?: string
@@ -59,7 +62,6 @@ function chatViewElement(overrides: Overrides): ReturnType<typeof createElement>
 
 let renderer: ReactTestRenderer | null = null
 
-// Stubs the frame clock and tears down the mounted view; call once at the top of a test file.
 export function installChatViewHooks(): void {
   beforeEach(() => {
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
@@ -76,7 +78,6 @@ export function installChatViewHooks(): void {
     scrollToEnd.mockReset()
     scrollToOffset.mockReset()
     Object.assign(pageScroller, { scrollTop: 0, scrollHeight: 0, clientHeight: 500 })
-    pageScroller.style.overflowAnchor = ''
     vi.unstubAllGlobals()
   })
 }
@@ -102,7 +103,6 @@ export async function update(overrides: Overrides = {}): Promise<void> {
   })
 }
 
-// Ids of the rows the list is currently rendering.
 export function listIds(): string[] {
   return (list().props.data as { id: string }[]).map((row) => row.id)
 }
@@ -115,7 +115,9 @@ export function renderedRow(id: string): ReactElement<Record<string, unknown>> {
   const listNode = list()
   const data = listNode.props.data as NativeChatMessage[]
   const index = data.findIndex((row) => row.id === id)
-  return listNode.props.renderItem({ item: data[index], index })
+  const row = listNode.props.renderItem({ item: data[index], index })
+  const resolved = resolveMobileNativeChatRowProps(index, data[index]!, row.props.lookups)
+  return createElement('Row', { ...row.props, ...resolved })
 }
 
 export function banners(): ReactTestInstance[] {
@@ -142,7 +144,6 @@ export async function pressSend(): Promise<void> {
   })
 }
 
-/** What the list reports from a scroll, drag or momentum event, in a 500-tall viewport. */
 export function scrollEvent(y: number, contentHeight: number) {
   return {
     nativeEvent: {

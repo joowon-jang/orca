@@ -47,6 +47,7 @@ describe('arch-aware packaging guard', () => {
       { electronPlatformName: process.platform, arch },
       bundleDir,
       () => undefined,
+      undefined,
       guestHelperDir
     )
 
@@ -78,8 +79,8 @@ describe('arch-aware packaging guard', () => {
           { electronPlatformName: process.platform, arch: HOST_ARCH },
           bundleDir,
           () => undefined,
-          guestHelperDir,
-          templateDir
+          templateDir,
+          guestHelperDir
         )
       ).toThrow(`${templateDir} holds an ORCA_LAYOUT_OWNER=main build`)
     } finally {
@@ -122,6 +123,7 @@ describe('arch-aware packaging guard', () => {
         { electronPlatformName: 'win32', arch: 1 },
         bundleDir,
         () => undefined,
+        undefined,
         guestHelperDir
       )
     if (process.platform === 'win32') {

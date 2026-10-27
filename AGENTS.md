@@ -1,13 +1,13 @@
 # Useful Commands
 
+- **Before handoff**: `pnpm check:changed --maxWorkers=2` (format, lint, typecheck, affected tests, ratchets; cached when nothing changed)
 - **Typecheck**: `pnpm tc` (or `tc:node` / `tc:cli` / `tc:web`)
-- **Test**: `pnpm test [path/to/file.test.ts]`
-- **Lint**: `oxlint`, or `pnpm run check:code-quality:changed` for changed files (full `pnpm lint` is slow); format with `pnpm format`
-- **Design system**: `pnpm run lint:design-system` for the full renderer report (not a gate); the changed-lines gate above is what CI enforces
+- **Test**: `pnpm test [path/to/file.test.ts]`; affected only: `pnpm test:changed [path] --maxWorkers=2` ([details](.github/CONTRIBUTING.md#targeting-local-tests))
+- **Lint**: `oxlint`; format: `pnpm format`
 
 # Design System
 
-All UI work — layout, color, typography, spacing, component selection, UX behavior — must follow [`docs/STYLEGUIDE.md`](./docs/STYLEGUIDE.md). Use the tokens defined in `src/renderer/src/assets/main.css` (the canonical source) and the shadcn primitives in `src/renderer/src/components/ui/`. Don't invent new color values, font sizes, or shadow tiers when a documented one already covers the role. When STYLEGUIDE.md is silent, follow the resolution order in its final section.
+All UI work — layout, color, typography, spacing, component selection, UX behavior — must follow [`docs/STYLEGUIDE.md`](./docs/STYLEGUIDE.md). Use the tokens defined in `src/renderer/src/assets/main.css` (the canonical source) and the shadcn primitives in `src/renderer/src/components/ui/`. Don't invent new color values, font sizes, or shadow tiers when a documented one already covers the role. Read the `docs/styleguide/` deep dive it links only when your change touches that topic. When STYLEGUIDE.md is silent, follow the resolution order in its final section.
 
 # Electron UI Validation
 
@@ -17,6 +17,7 @@ Never steal monitor focus or reveal test windows: no `show()`, `showInactive()`,
 Rebuild modified launch-policy code before running an app; stale build wrappers are not safe.
 
 Use the `$electron` skill and Playwright CDP for rendered Orca UI checks. Do not use computer-use for Orca UI validation.
+Screenshot presentational components without Electron: `pnpm fixtures:shot <id>`.
 
 # Code Style
 
@@ -24,10 +25,10 @@ Use the `$electron` skill and Playwright CDP for rendered Orca UI checks. Do not
 
 Before writing new logic at any scale — a function, component, IPC channel, state store, or whole subsystem/flow — check whether an existing implementation already does the job. Extend or generalize it instead of building a parallel version.
 
-## Concise/Brief Non-obvious Comments ONLY
+## Avoid Comments
 
-- DO NOT: be verbose, explain the obvious, walk through the code ("WHY not HOW")
-- BE CONCISE. 1 LINE if possible
+- Only use when code does not describe
+- BE CONCISE. 1 LINE if possible (why not how)
 
 ## File and Module Naming
 
@@ -43,7 +44,7 @@ Every change must consider these areas:
 
 ## Cross-Platform Support
 
-Support macOS, Linux, and Windows. Guard platform-specific behavior at runtime; use platform-aware shortcuts, paths, and existing process wrappers. Before changing platform-specific code, processes, shells, shortcuts, paths, or native modules, read [`docs/reference/cross-platform-support.md`](./docs/reference/cross-platform-support.md).
+Support macOS, Linux, and Windows. Guard platform-specific behavior at runtime; use platform-aware shortcuts, paths, and existing process wrappers.
 
 ## Remote Use Case
 
@@ -51,22 +52,18 @@ Support remote execution as well as local. Clients and servers update independen
 
 ## Mobile
 
-Keep mobile workflows and shared APIs working. Account for touch input and small screens in UI changes.
+Any feature should be considered for parity on mobile
 
-# Considerations
-
-## Worktree Safety
-
-Always use the primary working directory (the worktree) for all file reads and edits. Never follow absolute paths from subagent results that point to the main repo.
-
-## Folder Workspace Use Case
+## Folder Workspaces
 
 All changes must consider folder workspaces as well as git worktrees. Don't assume every workspace is a git worktree.
 
-## Agent Status
+# Git / GitHub
 
-The execution host owns agent status in one store, the hook server's, and every reader (sidebar, `worktree ps`, mobile, dashboard) subscribes to it. New producers write into that store, and readers keep only presentation policy.
+If changing code around `git`, `gh`, source-control, or review behavior, follow the repository's existing conventions.
 
-## Git and Review Work
+For a failed GitHub Actions run, inspect the failed jobs and retry with `gh run rerun <run-id> --failed --repo stablyai/orca`. Preserve successful jobs; use a full rerun only when the failure requires revalidating them. A code fix needs a new push and fresh checks, not a retry of the old SHA.
 
-Before running Git or `gh` commands, changing source-control or review behavior, or merging a pull request, read [`docs/reference/git-workflow.md`](./docs/reference/git-workflow.md).
+# Tests
+
+Avoid adding low-value tests. These might be fine for development but offer low value when checked in.

@@ -8,9 +8,7 @@ import {
   verifyWindowsTreeKillTarget,
   WINDOWS_ROOT_IDENTITY_TIMEOUT_MS
 } from './windows-pty-root-identity'
-// A real snapshot always contains the process doing the querying; the reader
-// rejects a table without it, because that is what a blocked
-// CreateToolhelp32Snapshot looks like (an empty list, not an error).
+// The native reader rejects snapshots that omit the querying process.
 const SELF_PROCESS_ROW = { pid: process.pid, ppid: 0, name: 'vitest.exe', commandLine: 'vitest' }
 const withSelf = <T>(rows: readonly T[]): (T | typeof SELF_PROCESS_ROW)[] => [
   SELF_PROCESS_ROW,
@@ -23,7 +21,6 @@ function link(pid: number, ppid: number): { pid: number; ppid: number } {
   return { pid, ppid }
 }
 
-/** Windows: services.exe → svchost.exe, a chain that never reaches Orca. */
 const SYSTEM_CHAIN = [link(4, 0), link(700, 4), link(900, 700)]
 
 describe('classifyWindowsTreeKillTarget', () => {
@@ -33,8 +30,6 @@ describe('classifyWindowsTreeKillTarget', () => {
   })
 
   it('accepts a winpty shell reached through the winpty-agent hop', () => {
-    // node-pty falls back to winpty below Windows build 18309, so the shell's
-    // parent is winpty-agent.exe rather than Orca itself.
     const rows = [link(ORCA_PID, 900), link(6100, ORCA_PID), link(4242, 6100)]
     expect(classifyWindowsTreeKillTarget(4242, rows, ORCA_PID)).toBe('own')
   })
@@ -57,7 +52,6 @@ describe('classifyWindowsTreeKillTarget', () => {
   })
 
   it('rejects a recycled pid whose parent has itself already exited', () => {
-    // The orphan's ppid names a vacated pid, so the chain dead-ends away from us.
     const rows = [link(ORCA_PID, 900), link(4242, 31337)]
     expect(classifyWindowsTreeKillTarget(4242, rows, ORCA_PID)).toBe('foreign')
   })

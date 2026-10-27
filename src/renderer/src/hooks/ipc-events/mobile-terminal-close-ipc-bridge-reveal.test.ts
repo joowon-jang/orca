@@ -45,7 +45,6 @@ vi.mock('@/lib/workspace-session-host-persistence', async (importOriginal) => ({
 import { registerMobileAndTerminalCloseIpcBridge } from './mobile-terminal-close-ipc-bridge'
 
 const WT = 'repo1::/repo1/wt'
-/** A workspace only main holds: the window draws none of its tabs yet. */
 const UNDRAWN = 'repo1::/repo1/undrawn'
 const FILE = { filePath: '/repo1/wt/notes.md', relativePath: 'notes.md' }
 
@@ -65,7 +64,7 @@ function setup(): {
         onOpenFileFromMobile: noop,
         onOpenDiffFromMobile: noop,
         onCloseTerminal: noop,
-        onSleepWorktree: noop,
+        onWorkspaceSleep: noop,
         onResumeSleepingAgents: noop,
         onRevealEditorTabFromRuntime: (cb: (payload: RuntimeEditorTabReveal) => void) => {
           reveal = cb
@@ -85,14 +84,20 @@ function setup(): {
     }
   })
   store.getState().setActiveWorktree(WT)
-  store.getState().openFile({
-    ...FILE,
-    worktreeId: WT,
-    language: 'markdown',
-    runtimeEnvironmentId: null,
-    mode: 'edit'
+  store.setState({
+    openFiles: [
+      {
+        ...FILE,
+        id: FILE.filePath,
+        worktreeId: WT,
+        language: 'markdown',
+        runtimeEnvironmentId: null,
+        isDirty: false,
+        mode: 'edit'
+      }
+    ]
   })
-  // A terminal tab in front, so showing the file's tab is visible in the selection.
+  store.getState().createUnifiedTab(WT, 'editor', { entityId: FILE.filePath, label: 'notes.md' })
   store.getState().createTab(WT)
   const fileTab = store
     .getState()

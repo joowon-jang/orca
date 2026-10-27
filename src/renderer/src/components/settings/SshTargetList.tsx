@@ -1,6 +1,8 @@
 import type { SshConnectionState, SshTarget } from '../../../../shared/ssh-types'
 import { translate } from '@/i18n/i18n'
 import { Checkbox } from '../ui/checkbox'
+import { VirtualizedList } from '../virtualized-list'
+import { useSettingsContentScrollElement } from './settings-content-scroll-element'
 import type { SshTargetBusyAction } from './ssh-target-action-state'
 import {
   groupSshTargetsBySource,
@@ -34,12 +36,12 @@ function groupTitle(group: SshTargetGroup): React.JSX.Element {
   return <>{translate('auto.components.settings.SshTargetList.fromConfig', 'From ~/.ssh/config')}</>
 }
 
+// Virtualize generated configs with over 10k hosts; rendering every card consumed gigabytes of DOM.
+const SSH_TARGET_ROW_ESTIMATE_PX = 52
+
 const NOT_LIST_CONTEXT = '[role="dialog"], [role="alertdialog"], [role="menu"], pre, textarea'
 
-/**
- * ⌘/Ctrl-A selects hosts only from the list's own row controls. React bubbles keydown through
- * portals, so a row's dialog, menu, or copyable detail text would otherwise lose select-all-text.
- */
+/** Scope host select-all to list controls; React portal bubbling must not steal text selection in dialogs/menus/details. */
 export function isListOwnSelectAllTarget(list: Element, target: EventTarget | null): boolean {
   if (!(target instanceof Element) || !list.contains(target)) {
     return false
@@ -53,7 +55,6 @@ export function isListOwnSelectAllTarget(list: Element, target: EventTarget | nu
   return target.closest(NOT_LIST_CONTEXT) === null
 }
 
-/** Hosts grouped by where they came from, each group selectable as a whole. */
 export function SshTargetList({
   targets,
   totalBySource,
@@ -69,6 +70,7 @@ export function SshTargetList({
   onServerChanged
 }: SshTargetListProps): React.JSX.Element {
   const groups = groupSshTargetsBySource(targets)
+  const scrollElement = useSettingsContentScrollElement()
   const isMac = navigator.userAgent.includes('Mac')
 
   return (
@@ -128,25 +130,35 @@ export function SshTargetList({
                 </span>
               </span>
             </div>
-            <div className="divide-y divide-border/40">
-              {group.targets.map((target) => (
-                <SshTargetCard
+            <VirtualizedList
+              rows={group.targets}
+              getRowKey={(target) => target.id}
+              scrollElement={scrollElement}
+              estimateRowHeightPx={SSH_TARGET_ROW_ESTIMATE_PX}
+              renderRow={(target) => (
+                // Absolutely positioned virtual rows need individual borders; divide-y cannot reach them.
+                <div
                   key={target.id}
-                  target={target}
-                  state={connectionStates.get(target.id)}
-                  testing={testingIds.has(target.id)}
-                  busyAction={busyActionForTarget(target.id)}
-                  selected={selection.selected.has(target.id)}
-                  onSelectClick={selection.click}
-                  onConnect={onConnect}
-                  onDisconnect={onDisconnect}
-                  onTest={onTest}
-                  onEdit={onEdit}
-                  onRemove={() => onRemove(target)}
-                  onServerChanged={onServerChanged}
-                />
-              ))}
-            </div>
+                  data-first-row={target === group.targets[0] ? 'true' : undefined}
+                  className="border-t border-border/40 data-[first-row=true]:border-t-0"
+                >
+                  <SshTargetCard
+                    target={target}
+                    state={connectionStates.get(target.id)}
+                    testing={testingIds.has(target.id)}
+                    busyAction={busyActionForTarget(target.id)}
+                    selected={selection.selected.has(target.id)}
+                    onSelectClick={selection.click}
+                    onConnect={onConnect}
+                    onDisconnect={onDisconnect}
+                    onTest={onTest}
+                    onEdit={onEdit}
+                    onRemove={() => onRemove(target)}
+                    onServerChanged={onServerChanged}
+                  />
+                </div>
+              )}
+            />
           </section>
         )
       })}

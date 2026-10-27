@@ -256,10 +256,7 @@ describe('structured agent session options', () => {
       }
     )
 
-    // The switch has no third position, so the value resolves to the catalog's
-    // own `false`. `unknown` is what stops any surface calling that a default:
-    // `default` is unreachable in this lane (it is hardcoded `mode: 'live'`), and
-    // nothing here has reported the tier the thread is actually routing.
+    // A binary switch resolves false, but unknown provenance prevents claiming it is the running default in this live-only lane.
     expect(structuredAgentSessionOptionSnapshot(state)).toContainEqual(
       expect.objectContaining({
         id: 'fastMode',
@@ -291,7 +288,13 @@ describe('structured agent session options', () => {
     ).toEqual([expect.objectContaining({ id: 'model', settable: false, valueSource: 'unknown' })])
     // Before the host answers, and on the built-in list, no saved pick is named.
     expect(viewModel(cold, seed, {})).toBeUndefined()
-    expect(viewModel(settleStructuredAgentSessionBuiltinCatalog(cold), seed, {})).toBeUndefined()
+    const settled = settleStructuredAgentSessionBuiltinCatalog(cold, false)
+    expect(viewModel(settled, seed, {})).toBeUndefined()
+    expect(settleStructuredAgentSessionBuiltinCatalog(settled, false)).toBe(settled)
+    expect(
+      settleStructuredAgentSessionBuiltinCatalog({ ...settled, listingInProgress: true }, false)
+        .listingInProgress
+    ).toBe(false)
     // Derived only: the record itself never takes the seed.
     expect(seeded.record.values.model).toBeUndefined()
     const live = applyStructuredAgentSessionOptions(seeded, CODEX_SESSION_OPTION_CATALOG, {

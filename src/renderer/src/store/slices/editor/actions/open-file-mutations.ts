@@ -4,20 +4,24 @@ import { isEditorTabContentType } from '../tabs/editor-tab-content-type'
 import type { Tab } from '../../../../../../shared/tab-types'
 import { ORCA_LAYOUT_OWNER_IS_MAIN } from '../../../../../../shared/layout-owner-switch'
 import { withPreviewEnded } from '../../tabs/tab-preview-flag'
+import { previewEditorTabsOf } from '../tabs/editor-tab-layout-owner'
 import {
-  previewEditorTabsOf,
-  recordPromotedEditorTabsInLayoutOwner
-} from '../tabs/editor-tab-layout-owner'
+  endsPreviewHere,
+  promotePreviewTabsThroughLayoutOwner
+} from '../../tabs/preview-tab-promotion'
 import {
   editorBufferOf,
   updateEditorBuffer,
   writeEditorBuffer
 } from '../buffers/editor-buffer-record'
 import { getDiskBaselineSignature } from '../../../../../../shared/disk-baseline-signature'
+import { editorBufferSiblingViewIds } from '../buffers/editor-buffer-views'
 
-function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+function withoutKeys<T>(record: Record<string, T>, keys: readonly string[]): Record<string, T> {
   const next = { ...record }
-  delete next[key]
+  for (const key of keys) {
+    delete next[key]
+  }
   return next
 }
 
@@ -30,9 +34,6 @@ export function createOpenFileMutations(
   | 'markFileDirty'
   | 'setExternalMutation'
   | 'setLastKnownDiskSignature'
-  | 'clearPendingDiskBaselineVerification'
-  | 'setPendingDiskBaselineVerification'
-  | 'setPendingLiveDiskVerification'
   | 'clearSelfMoveEcho'
   | 'clearUntitled'
 > {
@@ -44,9 +45,7 @@ export function createOpenFileMutations(
       set((s) => {
         const file = s.openFiles.find((f) => f.id === fileId)
         const worktreeId = file?.worktreeId
-        // Why the scope guard: an overlay workspace (the floating panel) activates files while a
-        // different workspace owns global selection; moving activeFileId would break the
-        // agent-auto-ack invariant that the floating active tab never becomes global selection.
+        // Floating/background activation stays workspace-local or violates agent-auto-ack’s global-selection invariant.
         const scopeWorktreeId = targetWorktreeId ?? worktreeId ?? s.activeWorktreeId
         return {
           ...(scopeWorktreeId === s.activeWorktreeId ? { activeFileId: fileId } : {}),
@@ -77,30 +76,36 @@ export function createOpenFileMutations(
       }
     },
 
-    markFileDirty: (fileId, dirty) => {
+    markFileDirty: (fileId, dirty, opts) => {
       const promoted: Tab[] = []
       set((s) => {
-        // Why: this fires on every keystroke; rebuilding openFiles unconditionally thrashes subscribers and caused typing lag, so bail when nothing changes.
+        // Per-keystroke openFiles rebuilds caused typing lag; preserve no-op identity.
         const file = s.openFiles.find((f) => f.id === fileId)
         if (!file) {
           return s
         }
         // Why: read-only tabs can never become dirty; hard no-op any stray change/save callback that reached here.
-        if (file.readOnly === true || file.csvPreviewOnly === true) {
+        if (
+          (file.readOnly === true || file.csvPreviewOnly === true) &&
+          (dirty || opts?.written !== true)
+        ) {
           return s
         }
-        const buffer = editorBufferOf(s.editorBuffers, file)
+        const buffer = editorBufferOf(s, file)
         const needsPreviewClear = dirty && file.isPreview
-        // Why: a clean tab holds no draft of the disk text; a kept one could later restore stale
-        // text into a shared model. A draft that differs from disk (whitespace a Markdown view
-        // does not count as an edit) is a real unsaved edit and stays.
+        // Clear disk-equal drafts from clean tabs or shared models can restore stale text; keep differing Markdown whitespace as real unsaved edits.
         const draft = s.editorDrafts[fileId]
         const dropDraft =
           !dirty &&
           draft !== undefined &&
           (buffer.lastKnownDiskSignature === undefined ||
             getDiskBaselineSignature(draft) === buffer.lastKnownDiskSignature)
-        if (buffer.isDirty === dirty && !needsPreviewClear && !dropDraft) {
+        if (
+          buffer.isDirty === dirty &&
+          file.isDirty === dirty &&
+          !needsPreviewClear &&
+          !dropDraft
+        ) {
           return s
         }
         if (ORCA_LAYOUT_OWNER_IS_MAIN && needsPreviewClear) {
@@ -113,14 +118,20 @@ export function createOpenFileMutations(
             { isDirty: dirty },
             needsPreviewClear ? { isPreview: undefined } : undefined
           ),
-          ...(dropDraft ? { editorDrafts: withoutKey(s.editorDrafts, fileId) } : {}),
+          // Why every view: views of one record share one draft.
+          ...(dropDraft
+            ? { editorDrafts: withoutKeys(s.editorDrafts, editorBufferSiblingViewIds(s, fileId)) }
+            : {}),
           ...(needsPreviewClear
             ? {
                 unifiedTabsByWorktree: Object.fromEntries(
                   Object.entries(s.unifiedTabsByWorktree ?? {}).map(([worktreeId, tabs]) => [
                     worktreeId,
                     tabs.map((tab) =>
-                      tab.entityId === fileId && isEditorTabContentType(tab.contentType)
+                      tab.entityId === fileId &&
+                      isEditorTabContentType(tab.contentType) &&
+                      // Switch point: main's frame ends a preview main owns.
+                      endsPreviewHere(s, worktreeId)
                         ? withPreviewEnded(tab)
                         : tab
                     )
@@ -130,9 +141,9 @@ export function createOpenFileMutations(
             : {})
         }
       })
-      // Switch point: main records that an edit made a preview tab permanent.
+      // Switch point: main makes the edited preview tabs permanent.
       if (ORCA_LAYOUT_OWNER_IS_MAIN && promoted.length > 0) {
-        recordPromotedEditorTabsInLayoutOwner(get(), promoted)
+        promotePreviewTabsThroughLayoutOwner(get(), set, promoted)
       }
     },
 
@@ -141,19 +152,6 @@ export function createOpenFileMutations(
 
     setLastKnownDiskSignature: (fileId, signature) =>
       set((s) => updateEditorBuffer(s, fileId, { lastKnownDiskSignature: signature })),
-
-    clearPendingDiskBaselineVerification: (fileId) =>
-      get().setPendingDiskBaselineVerification(fileId, false),
-
-    setPendingDiskBaselineVerification: (fileId, value) =>
-      set((s) =>
-        updateEditorBuffer(s, fileId, { pendingDiskBaselineVerification: value || undefined })
-      ),
-
-    setPendingLiveDiskVerification: (fileId, value) =>
-      set((s) =>
-        updateEditorBuffer(s, fileId, { pendingLiveDiskVerification: value || undefined })
-      ),
 
     clearSelfMoveEcho: (fileId) =>
       set((s) => {

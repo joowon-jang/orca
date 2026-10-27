@@ -22,8 +22,6 @@ import {
   guestTreeKillSha256
 } from '../../shared/guest-tree-kill-artifacts'
 
-// Mutable host stub. Relocation now reads the AppEnvironment port rather than electron's
-// `app`, so orcad's daemon launch path can resolve without Electron in the graph.
 const hostApp = {
   isPackaged: true,
   userDataPath: '',
@@ -88,7 +86,6 @@ const PROCESS_TREE_ADDON_REL = join(
   'windows_process_tree.node'
 )
 
-// The win32 prebuild dir the running host arch loads vs. the one that is pruned.
 const HOST_PREBUILD = `win32-${process.arch}`
 const OTHER_PREBUILD = HOST_PREBUILD === 'win32-arm64' ? 'win32-x64' : 'win32-arm64'
 
@@ -112,7 +109,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  // A test that fails between spyOn and mockRestore must not leak its mock into later tests.
   vi.restoreAllMocks()
   setProcessProp('platform', originalPlatform)
   setProcessProp('execPath', originalExecPath)
@@ -227,23 +223,16 @@ describe('buildDaemonHostManifest', () => {
       windowsProcessTreeDir: 'C:\\app\\resources\\node_modules\\@vscode\\windows-process-tree'
     })
     const byDest = new Map(ops.map((op) => [op.destRel, op]))
-    // The host exe keeps the source basename: a verbatim, signature-preserving copy with no
-    // image-name mismatch. What escapes the updater's sweep is the path, not the name.
     expect(byDest.get('Orca.exe')?.kind).toBe('file')
     const exeOp = ops.find((op) => op.sourcePath === 'C:\\app\\Orca.exe')
     expect(exeOp?.destRel).toBe('Orca.exe')
-    // Without this op the relocated daemon cannot resolve the native process
-    // table and falls back to a powershell.exe scan per snapshot (#16905).
+    // Missing this package forces a PowerShell scan per snapshot (#16905).
     expect(byDest.get('resources/node_modules/@vscode/windows-process-tree')?.kind).toBe('dir')
-    // V8/ICU data blobs are read by the Electron bootstrap and kept.
     expect(byDest.has('icudtl.dat')).toBe(true)
-    // GPU/graphics DLLs are never loaded by the windowless host, so not copied.
     expect(byDest.has('ffmpeg.dll')).toBe(false)
     expect(byDest.has('libEGL.dll')).toBe(false)
-    // Daemon bundle + node-pty mirrored at their real resources-relative paths.
     expect(byDest.get('resources/app.asar.unpacked/out/main/daemon-entry.js')?.kind).toBe('file')
     expect(byDest.get('resources/app.asar.unpacked/out/main/chunks')?.kind).toBe('dir')
-    // node-pty is copied with a filter dropping .pdb + non-host-arch prebuilds.
     const nodePtyOp = byDest.get('resources/node_modules/node-pty')
     expect(nodePtyOp?.kind).toBe('dir')
     expect(nodePtyOp?.filter?.('node-pty/build/Release/conpty.node')).toBe(true)
@@ -264,7 +253,6 @@ describe('materializeRelocatedDaemonHost', () => {
     )
     expect(existsSync(result!.execPath)).toBe(true)
     expect(existsSync(result!.entryPath)).toBe(true)
-    // node-pty native + conpty runtime copied at the require-resolvable path.
     expect(
       existsSync(
         join(dest, 'resources', 'node_modules', 'node-pty', 'build', 'Release', 'conpty.node')
@@ -273,8 +261,6 @@ describe('materializeRelocatedDaemonHost', () => {
     expect(
       existsSync(join(dest, 'resources', 'app.asar.unpacked', 'out', 'main', 'chunks', 'a.js'))
     ).toBe(true)
-    // Trim: GPU DLLs, .pdb debug symbols, and non-host-arch prebuilds excluded;
-    // the host arch's prebuild is retained so node-pty resolves its native addon.
     expect(existsSync(join(dest, 'ffmpeg.dll'))).toBe(false)
     expect(existsSync(join(dest, 'libEGL.dll'))).toBe(false)
     expect(
@@ -285,11 +271,9 @@ describe('materializeRelocatedDaemonHost', () => {
     const prebuildsDest = join(dest, 'resources', 'node_modules', 'node-pty', 'prebuilds')
     expect(existsSync(join(prebuildsDest, HOST_PREBUILD, 'pty.node'))).toBe(true)
     expect(existsSync(join(prebuildsDest, OTHER_PREBUILD, 'pty.node'))).toBe(false)
-    // Marker records the version + entry rel path, written into the published dir.
     const marker = JSON.parse(readFileSync(join(dest, '.materialized.json'), 'utf8'))
     expect(marker.version).toBe('9.9.9')
     expect(marker.entryRelPath).toBe('resources/app.asar.unpacked/out/main/daemon-entry.js')
-    // The whole package is mirrored, so require() finds every hop it walks.
     const processTreeDest = join(
       dest,
       'resources',
@@ -302,16 +286,12 @@ describe('materializeRelocatedDaemonHost', () => {
     )
     expect(existsSync(join(processTreeDest, 'lib', 'index.js'))).toBe(true)
     expect(existsSync(join(processTreeDest, 'lib', 'promises.js'))).toBe(true)
-    // Build intermediates are ~25MB of the installed package; the loader never reads them.
     expect(existsSync(join(processTreeDest, 'build', 'Release', 'windows_process_tree.pdb'))).toBe(
       false
     )
     expect(existsSync(join(processTreeDest, 'build', 'Release', 'obj'))).toBe(false)
     expect(existsSync(join(processTreeDest, 'src'))).toBe(false)
-    // The loader requires the BARE package, so resolution runs through the copied
-    // package.json's `main`. Asserting the .node subpath instead would still pass
-    // with package.json dropped from the filter, while the daemon's own require
-    // failed and it silently went back to the CIM scan.
+    // Resolve the bare package so missing package.json cannot hide behind a successful .node subpath lookup.
     expect(
       createRequire(
         join(dest, 'resources', 'app.asar.unpacked', 'out', 'main', 'chunks', 'a.js')
@@ -322,22 +302,17 @@ describe('materializeRelocatedDaemonHost', () => {
   it('copies the exe verbatim: same file name and same bytes as the install-dir exe', () => {
     const result = materializeRelocatedDaemonHost()
     const sourceExe = join(installDir, 'Orca.exe')
-    // Byte-for-byte under the same name is what preserves the Authenticode signature and leaves
-    // no renamed-image signal for endpoint detection to read as masquerading.
     expect(basename(result!.execPath)).toBe(basename(sourceExe))
     expect(readFileSync(result!.execPath)).toEqual(readFileSync(sourceExe))
   })
 
   it('tracks a differently-named app exe rather than pinning an image name of its own', () => {
-    // A dev-channel or rebranded build ships a different executableName; the host copy must follow
-    // it, which is what keeps the copy verbatim instead of reintroducing a name mismatch.
     renameSync(join(installDir, 'Orca.exe'), join(installDir, 'Orca Nightly.exe'))
     setProcessProp('execPath', join(installDir, 'Orca Nightly.exe'))
     const result = materializeRelocatedDaemonHost()
     const dest = relocatedHostRoot()
     expect(result?.execPath).toBe(join(dest, 'Orca Nightly.exe'))
     expect(existsSync(join(dest, 'orca-terminal-daemon.exe'))).toBe(false)
-    // Re-resolution must agree with materialization or the fork would target a missing exe.
     expect(getRelocatedDaemonHost()?.execPath).toBe(join(dest, 'Orca Nightly.exe'))
   })
 
@@ -346,8 +321,6 @@ describe('materializeRelocatedDaemonHost', () => {
     ['package.json', join(PROCESS_TREE_DIR_REL, 'package.json')],
     ['lib/index.js', join(PROCESS_TREE_DIR_REL, 'lib', 'index.js')]
   ])('refuses a mirror that lost %s', (_label, relativePath) => {
-    // Any one of them missing means require() cannot reach the addon, and a host
-    // that cannot load it runs anyway -- forking a shell per snapshot (#16905).
     materializeRelocatedDaemonHost()
     const dest = relocatedHostRoot()
     expect(getRelocatedDaemonHost()).not.toBeNull()
@@ -376,7 +349,6 @@ describe('materializeRelocatedDaemonHost', () => {
   })
 
   it('keeps a complete host ready when the install dir disappears', () => {
-    // A disappearing install tree during an update cannot invalidate the copied runtime.
     materializeRelocatedDaemonHost()
     const dest = relocatedHostRoot()
     const sentinel = join(dest, 'sentinel.txt')
@@ -396,20 +368,16 @@ describe('materializeRelocatedDaemonHost', () => {
     ['package.json', join(PROCESS_TREE_DIR_REL, 'package.json')],
     ['lib/index.js', join(PROCESS_TREE_DIR_REL, 'lib', 'index.js')]
   ])('refuses to copy anything when the install lost %s', (_label, relativePath) => {
-    // Each of these would be accepted by the copy plan and then refused by the
-    // mirror check, which is a ~260MB copy per launch to reach a verdict the
-    // source could have given for free. Sharing one list is what prevents that.
+    // Validate missing sources before an expensive copy that the mirror check would reject.
     rmSync(join(installDir, relativePath))
 
     expect(materializeRelocatedDaemonHost()).toBeNull()
-    // Not even the host root: the source is checked before any directory is made.
     expect(existsSync(getDaemonHostRootDir())).toBe(false)
   })
 
   it('is idempotent: a valid marker short-circuits without recopying', () => {
     materializeRelocatedDaemonHost()
     const dest = relocatedHostRoot()
-    // The same build must be reused, including unrelated files already in its mirror.
     const sentinel = join(dest, 'sentinel.txt')
     writeFileSync(sentinel, 'keep')
     const result = materializeRelocatedDaemonHost()
@@ -425,7 +393,6 @@ describe('materializeRelocatedDaemonHost', () => {
     const result = materializeRelocatedDaemonHost()
     expect(result).toBeNull()
     const hostRoot = getDaemonHostRootDir()
-    // Neither the published dest nor any leftover staging dir remains.
     const remaining = existsSync(hostRoot) ? readdirSync(hostRoot) : []
     expect(remaining).toEqual([])
   })
@@ -437,10 +404,7 @@ describe('materializeRelocatedDaemonHost', () => {
   })
 
   it('does nothing for a packaged host with no asar root (orcad on win32)', () => {
-    // orcad answers isPackaged() true — it is a shipped build — but it is plain Node: no
-    // asar, no resourcesPath, and no NSIS updater to escape. Relocation staging a copy of
-    // an Electron tree that is not there is the isPackaged-honesty defect, and it would
-    // silently produce a null host on a path whose failures are meant to be visible.
+    // orcad is packaged plain Node, without an Electron tree or NSIS updater to escape.
     hostApp.appPath = join(installDir, 'resources', 'app')
     installHostApp()
     expect(materializeRelocatedDaemonHost()).toBeNull()
@@ -460,8 +424,7 @@ describe('getRelocatedDaemonHost', () => {
   })
 })
 
-// Why: quarantine refuses records written in the last minute, because an in-flight publish is
-// indistinguishable from a torn one. Age a record so it stands for a settled corrupt record.
+// Age beyond the publication window so quarantine sees a settled corrupt record.
 function ageRecordPastQuarantineFloor(recordPath: string): void {
   const aged = new Date(Date.now() - 5 * 60_000)
   utimesSync(recordPath, aged, aged)
@@ -550,7 +513,6 @@ describe('pruneOldDaemonHosts', () => {
 
     expect(existsSync(join(root, '1.0.0'))).toBe(true)
     expect(existsSync(join(root, '2.0.0'))).toBe(true)
-    // The reason must reach the field log — an unobservable no-op is undiagnosable.
     expect(warnSpy).toHaveBeenCalledWith(
       '[daemon] Skipping daemon-host prune: the daemon runtime directory could not be read'
     )
@@ -576,8 +538,7 @@ describe('pruneOldDaemonHosts', () => {
     const runtimeDir = join(userDataDir, 'daemon')
     mkdirSync(join(root, '7.0.0'), { recursive: true })
     mkdirSync(runtimeDir, { recursive: true })
-    // Two protocol generations of the same app version: one daemon live, one exited. The live
-    // record must win the merged verdict whichever order the directory scan visits them.
+    // A live daemon must pin its version regardless of directory scan order.
     writeFileSync(
       join(runtimeDir, 'daemon-v7.pid'),
       JSON.stringify({ pid: 5001, startedAtMs: null, appVersion: '7.0.0' })
@@ -607,8 +568,7 @@ describe('pruneOldDaemonHosts', () => {
   it('preserves a host dir for any verdict that is not positively exited', () => {
     const root = getDaemonHostRootDir()
     mkdirSync(join(root, '1.0.0'), { recursive: true })
-    // Why: deliberate out-of-contract cast — deletion must require a positive 'exited' match,
-    // so a future verdict status the prune does not know preserves the host dir, not deletes it.
+    // Exercise a future liveness verdict outside the type contract; only positive exit permits deletion.
     const futureVerdict = {
       status: 'suspended',
       reason: 'hypothetical future verdict'
@@ -632,9 +592,7 @@ describe('pruneOldDaemonHosts', () => {
     const runtimeDir = join(userDataDir, 'daemon')
     mkdirSync(join(root, '1.0.0'), { recursive: true })
     mkdirSync(runtimeDir, { recursive: true })
-    // A tear inside the digits of pid 12345 leaves the prefix 123 — a DIFFERENT pid. Probing
-    // it would attribute an unrelated (here: dead) process's verdict to this record; the
-    // writer of a mid-digits tear died mid-write, so quarantine must not consult any probe.
+    // A torn PID prefix can name an unrelated process; quarantine must not use it as liveness evidence.
     const pidPath = join(runtimeDir, 'daemon-v7.pid')
     writeFileSync(pidPath, '{"pid":123')
     ageRecordPastQuarantineFloor(pidPath)
@@ -661,8 +619,7 @@ describe('pruneOldDaemonHosts', () => {
     const runtimeDir = join(userDataDir, 'daemon')
     mkdirSync(join(root, '1.0.0'), { recursive: true })
     mkdirSync(runtimeDir, { recursive: true })
-    // Pid 41234 torn to the prefix 4 — the Windows System pid, which answers probes forever.
-    // Trusting it would re-create for this one record the eternal veto pruning must not have.
+    // A torn PID prefix of 4 would otherwise inherit the Windows System process's permanent liveness.
     const pidPath = join(runtimeDir, 'daemon-v7.pid')
     writeFileSync(pidPath, '{"pid":4')
     ageRecordPastQuarantineFloor(pidPath)
@@ -680,7 +637,6 @@ describe('pruneOldDaemonHosts', () => {
     expect(killSpy).not.toHaveBeenCalled()
     expect(readFileSync(join(runtimeDir, 'daemon-v7.pid.corrupt'), 'utf8')).toBe('{"pid":4')
 
-    // Next launch: the listing is complete again and the unowned host is reclaimed.
     pruneOldDaemonHosts(collectPinnedDaemonVersions(runtimeDir))
     expect(existsSync(join(root, '1.0.0'))).toBe(false)
     warnSpy.mockRestore()
@@ -688,9 +644,7 @@ describe('pruneOldDaemonHosts', () => {
   })
 
   it('never quarantines a corrupt record that was just written', () => {
-    // A live daemon's record is created before it is written (writeFileSync 'wx'), so a
-    // concurrent launch can read it as empty. Quarantining it would strand the running daemon's
-    // record and let the NEXT launch reclaim its host image.
+    // wx creates the record before writing it; a fresh empty file may still belong to a live publisher.
     const root = getDaemonHostRootDir()
     const runtimeDir = join(userDataDir, 'daemon')
     mkdirSync(join(root, '1.0.0'), { recursive: true })
@@ -714,10 +668,7 @@ describe('pruneOldDaemonHosts', () => {
   })
 
   it('never treats a settled empty record as a valid pre-relocation daemon', () => {
-    // Number('') === 0, so the parser's legacy bare-integer fallback accepts an empty record as
-    // pid 0 with appVersion null. Skipping it as "pins no host dir" would leave the version
-    // unpinned and let the prune below reclaim a live daemon's host image. Aged past the
-    // quarantine floor so this pins the pid guard rather than the freshness guard.
+    // Age past the freshness guard to exercise the PID-0 result of parsing an empty legacy record.
     const root = getDaemonHostRootDir()
     const runtimeDir = join(userDataDir, 'daemon')
     mkdirSync(join(root, '1.0.0'), { recursive: true })
@@ -743,8 +694,7 @@ describe('pruneOldDaemonHosts', () => {
     const runtimeDir = join(userDataDir, 'daemon')
     mkdirSync(join(root, '1.0.0'), { recursive: true })
     mkdirSync(runtimeDir, { recursive: true })
-    // A torn write preserves the pid prefix; the process behind it still answers, so the
-    // record may belong to a live daemon of unknown version and must keep its veto un-quarantined.
+    // The complete PID still answers; a torn version field cannot justify quarantining its record.
     const pidPath = join(runtimeDir, 'daemon-v7.pid')
     writeFileSync(pidPath, '{"pid": 4242, "startedAtMs": 17')
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
@@ -774,8 +724,6 @@ describe('pruneOldDaemonHosts', () => {
     ageRecordPastQuarantineFloor(pidPath)
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-    // Launch with the corrupt record: prune skips once, and the record is quarantined in place
-    // (bytes preserved) instead of vetoing every future launch.
     const evidence = collectPinnedDaemonVersions(runtimeDir)
     expect(evidence).toEqual({
       status: 'unverifiable',
@@ -788,7 +736,6 @@ describe('pruneOldDaemonHosts', () => {
       'not a daemon record'
     )
 
-    // Next launch: the listing is complete again and the unowned host is reclaimed.
     const nextEvidence = collectPinnedDaemonVersions(runtimeDir)
     expect(nextEvidence).toEqual({ status: 'complete', versionLiveness: new Map() })
     pruneOldDaemonHosts(nextEvidence)
@@ -797,7 +744,7 @@ describe('pruneOldDaemonHosts', () => {
   })
 
   it('vetoes pruning without quarantine when a pid record cannot be read', (ctx) => {
-    // The suite mocks process.platform; the chmod trick needs the REAL host to be POSIX.
+    // process.platform is mocked; permission fixtures depend on the actual host.
     if (originalPlatform === 'win32') {
       return ctx.skip()
     }
@@ -811,14 +758,11 @@ describe('pruneOldDaemonHosts', () => {
     try {
       readFileSync(pidPath)
       return ctx.skip() // Running as root: the permission bit cannot make the read fail.
-    } catch {
-      // The read fails as intended.
-    }
+    } catch {}
 
     const evidence = collectPinnedDaemonVersions(runtimeDir)
 
-    // A read failure is transient (AV lock, vanished file): veto this launch, but leave the
-    // record alone so a launch that can read it re-evaluates from the real bytes.
+    // Transient read failures veto pruning without quarantining the record.
     expect(evidence).toEqual({
       status: 'unverifiable',
       reason: 'the daemon pid file could not be read: daemon-v7.pid'
@@ -834,8 +778,7 @@ describe('pruneOldDaemonHosts', () => {
     hostApp.appPath = join(installDir, 'resources', 'app')
     installHostApp()
     pruneOldDaemonHosts({ status: 'complete', versionLiveness: new Map() })
-    // A Node host owns no daemon-host tree, so deleting under it would be reaching into a
-    // directory layout it never created.
+    // Node hosts do not own this Electron runtime layout and cannot authorize its cleanup.
     expect(existsSync(join(root, '1.0.0'))).toBe(true)
   })
 })

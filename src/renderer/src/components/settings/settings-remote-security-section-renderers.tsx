@@ -17,7 +17,6 @@ export function renderServersSettingsSection(context: SettingsRenderContext): Re
       <SettingsSection
         id="servers"
         title={translate('auto.components.settings.Settings.bd0181eeca', 'Remote Orca Servers')}
-        badge="Beta"
         description={
           model.isWebClient
             ? translate(
@@ -30,8 +29,12 @@ export function renderServersSettingsSection(context: SettingsRenderContext): Re
               )
         }
         searchEntries={navigation.getSectionSearchEntries('servers')}
-        headerAction={mounted ? <RuntimeServersHeaderActions /> : undefined}
-        // Why unframed: the server list and cards are the page's own surfaces; a band around them nests cards.
+        headerAction={
+          mounted ? (
+            <RuntimeServersHeaderActions canGeneratePairingUrl={!model.isWebClient} />
+          ) : undefined
+        }
+        // Rows/cards already supply surfaces; another frame would nest cards.
         bodyClassName="rounded-none border-0 bg-transparent px-0 py-0 shadow-none"
       >
         {mounted ? (
@@ -62,7 +65,7 @@ export function renderSshSettingsSection(context: SettingsRenderContext): React.
         )}
         searchEntries={navigation.getSectionSearchEntries('ssh')}
         headerAction={mounted ? <SshHostsHeaderSlot /> : undefined}
-        // Why unframed: the host groups are the page's own surfaces; a band around them nests cards.
+        // Host groups already supply surfaces; another frame would nest cards.
         bodyClassName="rounded-none border-0 bg-transparent px-0 py-0 shadow-none"
       >
         {mounted ? <SshPane addTargetIntentSignal={model.sshHostAddIntentSignal} /> : null}

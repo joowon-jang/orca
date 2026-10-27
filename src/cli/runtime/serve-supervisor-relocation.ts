@@ -1,22 +1,20 @@
-/**
- * `orca serve --supervise` re-runs itself from a copy of the CLI outside the app. The CLI loads
- * modules lazily from the app's files, so a desktop update that swaps the app under a running
- * supervisor would otherwise mix two releases' code inside one process. The served child still
- * starts from the app, so it updates as before.
- */
+/** Copy supervisors outside the app so updates cannot mix lazily loaded modules from two releases. */
 import { createHash } from 'node:crypto'
-import { constants, readFileSync, statSync } from 'node:fs'
-import { cp, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { constants, readFileSync, rmSync, statSync } from 'node:fs'
+import { cp, mkdir, stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { cloneMacTree } from '../../main/macos-tree-clone'
 import { isProcessAlive } from '../../shared/serve-bundle-coordination'
+import {
+  publishClaimedSnapshot,
+  removeUnusedSnapshots,
+  snapshotUsersDir
+} from './claimed-snapshot-store'
 
-/** Set on the re-run supervisor: the app root its own `__dirname` no longer points at. */
+/** Relocated supervisors can no longer derive the app root from __dirname. */
 export const SERVE_SUPERVISOR_APP_ROOT_ENV = 'ORCA_SERVE_SUPERVISOR_APP_ROOT'
 
 const PACKAGED_APP_ROOT_NAME = 'app.asar.unpacked'
-const COMPLETE_MARKER = '.complete'
-const USERS_DIR = '.users'
-const TEMPORARY_PREFIX = '.tmp-'
 
 export type SupervisorRelocationDeps = {
   env: NodeJS.ProcessEnv
@@ -59,84 +57,31 @@ async function exists(path: string): Promise<boolean> {
   )
 }
 
-/** Who runs from each copy, kept beside the copies so it never blocks publishing one. */
-const usersDir = (root: string, id: string): string => join(root, USERS_DIR, id)
-
-async function buildSnapshot(
-  resources: string,
-  root: string,
-  id: string,
-  pid: number
-): Promise<void> {
-  // Why mark before checking: another supervisor's cleanup keeps any copy with a live user.
-  await mkdir(usersDir(root, id), { recursive: true })
-  await writeFile(join(usersDir(root, id), String(pid)), '')
-  const snapshotDir = join(root, id)
-  if (await exists(join(snapshotDir, COMPLETE_MARKER))) {
-    return
+async function copyTree(source: string, destination: string): Promise<void> {
+  // macOS cp -c clones a tree faster than fs.cp’s per-file cloning.
+  if (process.platform === 'darwin') {
+    return cloneMacTree(source, destination)
   }
-  const temporary = join(root, `${TEMPORARY_PREFIX}${pid}-${id}`)
-  await rm(temporary, { recursive: true, force: true })
-  try {
-    // Why both: bare requires from out/ walk up into Resources/node_modules.
+  // Share app blocks on reflink filesystems.
+  await cp(source, destination, {
+    recursive: true,
+    verbatimSymlinks: true,
+    mode: constants.COPYFILE_FICLONE
+  })
+}
+
+function buildSnapshot(resources: string, root: string, id: string, pid: number): Promise<string> {
+  return publishClaimedSnapshot(root, id, pid, async (directory) => {
+    // Bare requires from out/ resolve through Resources/node_modules.
     for (const name of [PACKAGED_APP_ROOT_NAME, 'node_modules']) {
       if (await exists(join(resources, name))) {
-        // Why FICLONE: on APFS and reflink filesystems the copy shares blocks with the app.
-        await cp(join(resources, name), join(temporary, name), {
-          recursive: true,
-          verbatimSymlinks: true,
-          mode: constants.COPYFILE_FICLONE
-        })
+        await copyTree(join(resources, name), join(directory, name))
       }
     }
-    await writeFile(join(temporary, COMPLETE_MARKER), '')
-  } catch (error) {
-    // Why: a partial copy on a full disk would otherwise keep that space for the service's life.
-    await rm(temporary, { recursive: true, force: true }).catch(() => undefined)
-    throw error
-  }
-  try {
-    await rename(temporary, snapshotDir)
-  } catch (error) {
-    // Another supervisor of this profile finished the same release first.
-    await rm(temporary, { recursive: true, force: true })
-    if (!(await exists(join(snapshotDir, COMPLETE_MARKER)))) {
-      throw error
-    }
-  }
+  })
 }
 
-function isLivePidName(name: string, isProcessAlive: (pid: number) => boolean): boolean {
-  const pid = Number(name)
-  return Number.isSafeInteger(pid) && pid > 0 && isProcessAlive(pid)
-}
-
-async function removeUnusedSnapshots(
-  root: string,
-  keep: string,
-  isProcessAlive: (pid: number) => boolean
-): Promise<void> {
-  for (const name of await readdir(root).catch(() => [])) {
-    if (name === keep || name === USERS_DIR) {
-      continue
-    }
-    const inUse = name.startsWith(TEMPORARY_PREFIX)
-      ? isLivePidName(name.slice(TEMPORARY_PREFIX.length).split('-')[0], isProcessAlive)
-      : (await readdir(usersDir(root, name)).catch(() => [])).some((pid) =>
-          isLivePidName(pid, isProcessAlive)
-        )
-    if (!inUse) {
-      await rm(join(root, name), { recursive: true, force: true }).catch(() => undefined)
-      await rm(usersDir(root, name), { recursive: true, force: true }).catch(() => undefined)
-    }
-  }
-}
-
-/**
- * An AppImage's files are its own mount (or extracted copy) for the whole run, so no update can
- * swap them. Re-exec from node mode would also close the runtime's keepalive pipe, which unmounts
- * the AppImage under the exec and leaves the new image unable to load its libraries.
- */
+/** AppImages keep stable files; re-exec would close their keepalive pipe and release the mount. */
 function runsFromAppImage(appRoot: string, env: NodeJS.ProcessEnv): boolean {
   const appDir = env.APPDIR
   if (!appDir || !isAbsolute(appDir)) {
@@ -146,17 +91,14 @@ function runsFromAppImage(appRoot: string, env: NodeJS.ProcessEnv): boolean {
   return inside !== '' && !inside.startsWith('..') && !isAbsolute(inside)
 }
 
-/**
- * Resolves only when the supervisor keeps running from where it is; a successful re-run replaces
- * this process (same pid, so the service manager keeps tracking it) and never returns.
- */
+/** A successful relocation replaces this process at the same PID and never returns. */
 export async function relocateServeSupervisor(
   deps: SupervisorRelocationDeps
 ): Promise<'in-place' | 'already-relocated' | 'relocated'> {
   if (deps.env[SERVE_SUPERVISOR_APP_ROOT_ENV]) {
     return 'already-relocated'
   }
-  // Why packaged only: a dev or overridden executable has no app swapped under it by an update.
+  // Dev and overridden executables are not swapped by app updates.
   const override = deps.env.ORCA_APP_EXECUTABLE
   if (
     deps.env.ELECTRON_RUN_AS_NODE !== '1' ||
@@ -193,6 +135,21 @@ export async function relocateServeSupervisor(
   return 'relocated'
 }
 
+/** Releases `pid`'s claim on the copy it runs `cliEntry` from, so cleanup can remove that copy. */
+export function releaseServeSupervisorSnapshot(cliEntry: string, pid: number): void {
+  const snapshotDir = resolve(cliEntry, '..', '..', '..', '..')
+  rmSync(join(snapshotUsersDir(dirname(snapshotDir), basename(snapshotDir)), String(pid)), {
+    force: true
+  })
+}
+
+export function execveThisProcess(file: string, args: string[], env: NodeJS.ProcessEnv): void {
+  if (!process.execve) {
+    throw new Error('this runtime cannot replace its own process')
+  }
+  process.execve(file, args, env)
+}
+
 export function relocateThisServeSupervisor(
   appRoot: string,
   userDataPath: string
@@ -205,12 +162,7 @@ export function relocateThisServeSupervisor(
     userDataPath,
     pid: process.pid,
     isProcessAlive,
-    execve: (file, args, env) => {
-      if (!process.execve) {
-        throw new Error('this runtime cannot replace its own process')
-      }
-      process.execve(file, args, env)
-    },
+    execve: execveThisProcess,
     log: (line) => process.stderr.write(`${line}\n`)
   })
 }

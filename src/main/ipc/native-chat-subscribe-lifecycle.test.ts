@@ -48,7 +48,7 @@ type SenderHarness = {
   sender: {
     id: number
     isDestroyed: () => boolean
-    once: (event: string, callback: () => void) => void
+    on: (event: string, callback: () => void) => void
     removeListener: (event: string, callback: () => void) => void
     send: ReturnType<typeof vi.fn>
   }
@@ -90,7 +90,7 @@ function createSender(id: number): SenderHarness {
     sender: {
       id,
       isDestroyed: () => destroyed,
-      once: (event, callback) => void events.once(event, callback),
+      on: (event, callback) => void events.on(event, callback),
       removeListener: (event, callback) => void events.removeListener(event, callback),
       send: vi.fn()
     }
@@ -113,8 +113,7 @@ type InitialSnapshotCallback = (
   lifecycle?: NativeChatTurnLifecycle
 ) => void
 
-// The onInitialSnapshot callback the handler passed into the Nth subscribeTranscript
-// call; transcript-watch fires it during setup, so tests invoke it directly.
+/** Capture the real setup callback so tests can drive initial transcript snapshots. */
 function initialSnapshot(callIndex: number): InitialSnapshotCallback {
   const call = subscribeTranscript.mock.calls[callIndex]
   if (!call) {
@@ -264,8 +263,7 @@ describe('nativeChat subscribe lifecycle', () => {
     const renderer = createSender(5)
 
     subscribe(renderer.sender, 'drain-error')
-    // transcript-watch delivers the drain error synchronously via onInitialSnapshot;
-    // invoke the captured callback to exercise the handler's forwarding closure.
+    // Initial drain errors arrive synchronously through this handler-owned callback.
     initialSnapshot(0)([], false, 0, 'Transcript unavailable')
 
     expect(renderer.sender.send).toHaveBeenCalledWith('nativeChat:appended', {
