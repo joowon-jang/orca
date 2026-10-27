@@ -169,6 +169,8 @@ describe('tab.close uses the unified active tab', () => {
       getActiveTab: () => tab,
       unifiedTabsByWorktree: { [worktreeId]: [tab] },
       openFiles: [],
+      editorBufferIdOf: {},
+      editorBufferViews: {},
       browserPagesByWorkspace: {},
       closeUnifiedTab,
       closeFile,
@@ -248,6 +250,20 @@ describe('tab.close uses the unified active tab', () => {
     await vi.waitFor(() => expect(closeUnifiedTab).toHaveBeenCalledWith(tab.id))
   })
 
+  it('leaves the chord to an agent terminal preview dialog over a workspace editor', () => {
+    tab.contentType = 'editor'
+    const preview = document.createElement('div')
+    preview.setAttribute('data-agent-terminal-preview', '')
+    const target = document.createElement('textarea')
+    target.classList.add('xterm-helper-textarea')
+    preview.appendChild(target)
+    const event = new KeyboardEvent('keydown', { key: 'w', metaKey: true, cancelable: true })
+    Object.defineProperty(event, 'target', { value: target })
+    handleTerminalWorkspaceKeyDown(event, controller, 'darwin')
+    expect(event.defaultPrevented).toBe(false)
+    expect(closeUnifiedTab).not.toHaveBeenCalled()
+  })
+
   it('does not close the main workspace tab while the floating panel owns focus', () => {
     mocks.floatingFocused = true
     expect(close().defaultPrevented).toBe(false)
@@ -304,18 +320,24 @@ describe('shared tab navigation routing', () => {
     mocks.state = { activeWorktreeId: controller.activeWorktreeId }
   })
 
-  function nextTab(): void {
-    handleTerminalWorkspaceKeyDown(
-      new KeyboardEvent('keydown', {
-        key: ']',
-        metaKey: true,
-        shiftKey: true,
-        cancelable: true
-      }),
-      controller,
-      'darwin'
-    )
+  function nextTab(repeat = false): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', {
+      key: ']',
+      metaKey: true,
+      shiftKey: true,
+      cancelable: true,
+      repeat
+    })
+    handleTerminalWorkspaceKeyDown(event, controller, 'darwin')
+    return event
   }
+
+  it('claims a held tab chord on every repeat but switches once', () => {
+    nextTab()
+    const repeat = nextTab(true)
+    expect(repeat.defaultPrevented).toBe(true)
+    expect(handleSwitchTabAcrossAllTypes).toHaveBeenCalledTimes(1)
+  })
 
   it('sends the keyboard and IPC navigation intent to the same workspace operation', () => {
     nextTab()
@@ -349,6 +371,8 @@ describe('tab.closeAll confirmation', () => {
       activeView: 'terminal',
       activeTabType: 'editor',
       openFiles: [makeOpenFile({ id: 'file-1', worktreeId })],
+      editorBufferIdOf: {},
+      editorBufferViews: {},
       unifiedTabsByWorktree: { [worktreeId]: [] },
       getActiveTab: () => null
     }

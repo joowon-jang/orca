@@ -35,6 +35,7 @@ import { AgentSessionContinuationDialog } from '@/components/agent-session-conti
 import { AiVaultScanIssueBanners } from './AiVaultScanIssueBanners'
 import { useAiVaultSessionDeleteAction } from './ai-vault-session-delete-action'
 import { useAiVaultPanelSearch } from './use-ai-vault-search'
+import { withAiVaultHistoryPreviews } from './ai-vault-search-session'
 import { aiVaultSearchScopeIdentity } from './ai-vault-search-scope-identity'
 import { AiVaultPanelSearch } from './AiVaultPanelSearch'
 import { useAiVaultPanelSessionResume } from './use-ai-vault-panel-session-resume'
@@ -48,6 +49,7 @@ import {
 } from './use-ai-vault-session-keyboard-navigation'
 import { useAiVaultPanelHandle, type AiVaultPanelProps } from './ai-vault-panel-handle'
 import { aiVaultSearchHitHostLabels } from './ai-vault-search-hit-hosts'
+import { selectFolderWorkspaces, selectWorktreesByRepo } from '@/store/workspace-record-selectors'
 
 export default function AiVaultPanel({
   ref,
@@ -70,10 +72,10 @@ export default function AiVaultPanel({
     useShallow((state) => ({
       projects: state.projects,
       settings: state.settings,
-      folderWorkspaces: state.folderWorkspaces,
+      folderWorkspaces: selectFolderWorkspaces(state),
       projectGroups: state.projectGroups,
       repos: state.repos,
-      worktreesByRepo: state.worktreesByRepo
+      worktreesByRepo: selectWorktreesByRepo(state)
     }))
   )
   const settings = useAppStore((s) => s.settings)
@@ -100,7 +102,6 @@ export default function AiVaultPanel({
     setAllAgentsEnabled,
     resetViewOptions
   } = usePersistedAiVaultViewOptions(initialAgents)
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
   const { executionHostScope, onExecutionHostScopeChange, hostScopeOptions } =
     useAiVaultPanelHostScope(activeWorktreeId ?? null, resumeTargetState)
   const activeWorktreePath = activeWorktree?.path ?? null
@@ -122,9 +123,10 @@ export default function AiVaultPanel({
     [activeRepo, activeWorktree, allWorktrees, projectHostSetupProjection, repos]
   )
   const activeProjectKey = projectScopeContext.activeProjectKey
-  const { scope, handleScopeChange } = useAiVaultPanelScope({
+  const { scope, handleScopeChange, collapsedGroups, toggleGroup } = useAiVaultPanelScope({
     activeProjectKey,
-    activeWorktreePath
+    activeWorktreePath,
+    local: workspace !== undefined
   })
   const projectLabelByKey = projectScopeContext.projectLabelByKey
   // Sent to the scanner so scoped views surface sessions older than the global cap.
@@ -146,8 +148,7 @@ export default function AiVaultPanel({
     sessions: history,
     loadedSessionLimit
   } = useAiVaultSessionRefresh(scopePaths, executionHostScope, sessionLimit)
-  // Why an identity and not paths: a project's worktrees are the host's to
-  // enumerate, and a repo with hundreds of them has no path list a request can carry.
+  // Send scope identity: the host owns project worktree enumeration, and hundreds of paths cannot fit a request.
   const searchWithin = useMemo(
     () =>
       aiVaultSearchScopeIdentity({
@@ -159,7 +160,11 @@ export default function AiVaultPanel({
   )
   const search = useAiVaultPanelSearch(query, agents, searchWithin, executionHostScope, searchSort)
   const { searching, searchHits } = search
-  const sessions = searching ? search.sessions : history
+  const searchSessions = useMemo(
+    () => withAiVaultHistoryPreviews(search.sessions, history),
+    [history, search.sessions]
+  )
+  const sessions = searching ? searchSessions : history
   const requestedScanKey = aiVaultLocalScanKey({
     scopePaths,
     includeAntigravityIdeSessions: true,
@@ -168,8 +173,7 @@ export default function AiVaultPanel({
   })
   const scanProgress = useAiVaultScanProgress(executionHostScope, requestedScanKey)
   const stripProgress = searching ? null : scanProgress
-  // Deliberately blind to the active repo/worktree: rebuilding these session
-  // maps on every worktree switch is what made switching visibly slow (#10841 era).
+  // Keep session maps independent of active workspace switches to avoid rebuilding them during navigation (#10841).
   const sessionProjectById = useMemo(
     () =>
       buildAiVaultSessionProjectById({
@@ -238,18 +242,6 @@ export default function AiVaultPanel({
     changeScope: handleScopeChange,
     setFocusSearchRequestId
   })
-
-  const toggleGroup = useCallback((key: string) => {
-    setCollapsedGroups((current) => {
-      const next = new Set(current)
-      if (next.has(key)) {
-        next.delete(key)
-      } else {
-        next.add(key)
-      }
-      return next
-    })
-  }, [])
 
   const requestDelete = useAiVaultSessionDeleteAction({
     refresh,

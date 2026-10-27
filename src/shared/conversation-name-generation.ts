@@ -1,4 +1,4 @@
-import { normalizeAgentSessionConversationName } from './agent-session-conversation-name'
+import { normalizeAgentSessionConversationName } from './agent-session/agent-session-conversation-name'
 import { cleanGeneratedCommitMessage } from './commit-message-agent-output'
 import { sliceAtCodeUnitLimit } from './surrogate-safe-text-slice'
 
@@ -47,8 +47,8 @@ export function sanitizeGeneratedConversationName(raw: string): string | null {
     const unwrapped = name
       .replace(/^(\*\*|__)(.*?)\1$/u, '$2')
       .replace(/^("|'|`)(.*?)\1$/u, '$2')
-      .replace(/^“(.*)”$/u, '$1')
-      .replace(/^‘(.*)’$/u, '$1')
+      .replace(/^\u201C(.*)\u201D$/u, '$1')
+      .replace(/^\u2018(.*)\u2019$/u, '$1')
       .replace(/^title\s*:\s*/iu, '')
       .trim()
     if (unwrapped === name) {
@@ -60,8 +60,7 @@ export function sanitizeGeneratedConversationName(raw: string): string | null {
   return name ? normalizeAgentSessionConversationName(clipConversationName(name)) : null
 }
 
-/** The chat's name until a generated one replaces it, so a failed generation never leaves the
- *  placeholder label. */
+/** Seed a real name so failed generation cannot strand the placeholder. */
 export function conversationNameSeed(firstPrompt: string): string | null {
   const prompt = normalizeAgentSessionConversationName(firstPrompt)
   if (!prompt) {

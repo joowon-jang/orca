@@ -1,11 +1,10 @@
-// A chat's saved model rides the launch unchecked. A missing-model reply retires the live child's
-// choice; provider reports leave the saved pick alone. Against the production runtime, adapter,
-// record store and host, with only the CLI process scripted.
+// Missing-model replies retire the live choice; provider reports must preserve the saved user pick.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { computeAgentSessionPayloadFingerprint } from '../../shared/agent-session-mutation-envelope'
 import { claudeSessionIdForOrcaSession } from '../claude/claude-structured-launch-resolution'
 import type { StructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-host'
+import { hostTestMessage } from '../native-chat/agent-session-wire/structured-agent-session-host-test-data'
 import { createScriptedClaudeRuntime } from './structured-claude-scripted-runtime-test-support'
 import { structuredAgentSessionSeedCatalog } from '../../shared/structured-agent-session-seed-catalog'
 import {
@@ -25,7 +24,6 @@ afterEach(async () => {
   claude = createScriptedClaudeRuntime([SESSION])
 })
 
-/** The reply Claude Code 2.1.280 sends when its `--model` names a model that does not exist. */
 function modelNotFoundReply(uuid: string, parentToolUseId: string | null = null) {
   return {
     type: 'assistant',
@@ -71,10 +69,15 @@ describe("a Claude chat whose saved model the CLI says doesn't exist", () => {
       model: RETIRED,
       effort: 'high'
     })
-    // The picker shows what the child runs now, so the next send moves the chat off the model.
+    const live = await host.deps.adapter.readOptions?.({
+      sessionId: SESSION,
+      fence: host.deps.store.getRecord(SESSION)!.lease.runtimeFence
+    })
+    expect(live).toMatchObject({ current: { model: undefined } })
     const answer = await vi.waitFor(async () => {
       const read = await host.readOptions(SESSION, { readsWithoutModel: true })
       expect(read.current.model).not.toBe(RETIRED)
+      expect(read.current).toMatchObject({ model: 'sonnet', defaulted: [] })
       return read
     })
     const seed = structuredAgentSessionSeedCatalog('claude')
@@ -83,8 +86,35 @@ describe("a Claude chat whose saved model the CLI says doesn't exist", () => {
       seed,
       answer
     )
-    expect(structuredAgentSessionSendSelection(reopened)).toMatchObject({
-      model: answer.current.model
+    const options = structuredAgentSessionSendSelection(reopened)
+    expect(options).toEqual({ model: answer.current.model, effort: 'high' })
+    const dispatch = vi.spyOn(host.deps.adapter, 'dispatch')
+    const setModel = vi.spyOn(claude.child(SESSION).connection, 'setModel')
+    const body = hostTestMessage('try the replacement')
+    const sent = await host.send(CALLER, {
+      envelope: {
+        sessionId: SESSION,
+        clientOperationId: `${Date.now()}-${'2'.padStart(32, '0')}`,
+        expectedRuntimeFence: host.deps.store.getRecord(SESSION)?.lease.runtimeFence ?? 0,
+        payloadFingerprint: computeAgentSessionPayloadFingerprint({
+          method: 'agentSession.send',
+          sessionId: SESSION,
+          fields: { body, options }
+        })
+      },
+      body,
+      options
+    })
+    expect(sent).toMatchObject({ ok: true })
+    await vi.waitFor(() => expect(claude.child(SESSION).calls).toContain('send'))
+    expect(dispatch.mock.calls[0]?.[0].executionOptions).toEqual({
+      model: answer.current.model,
+      effort: 'high'
+    })
+    expect(setModel.mock.calls.map(([model]) => model)).toEqual([answer.current.model])
+    expect(host.deps.store.getRecord(SESSION)?.options).toMatchObject({
+      model: RETIRED,
+      effort: 'high'
     })
   })
 
@@ -95,9 +125,15 @@ describe("a Claude chat whose saved model the CLI says doesn't exist", () => {
     await host.flushStreamedEvents(SESSION)
 
     expect(host.deps.store.getRecord(SESSION)?.options?.model).toBe(RETIRED)
+    const live = await host.deps.adapter.readOptions?.({
+      sessionId: SESSION,
+      fence: host.deps.store.getRecord(SESSION)!.lease.runtimeFence
+    })
+    expect(live).toMatchObject({ current: { model: RETIRED } })
+    expect(claude.child(SESSION).calls).not.toContain('set_model')
   })
 
-  // The CLI's word is about the model it was launched with; a pick made since is the user's.
+  // A concurrent user pick outranks the launch model's failure.
   it('keeps a model the user picked while the heal was on its way', async () => {
     const host = await startedWith({ model: RETIRED })
     const record = () => host.deps.store.getRecord(SESSION)
@@ -122,7 +158,6 @@ describe("a Claude chat whose saved model the CLI says doesn't exist", () => {
     expect(record()?.options?.model).toBe('opus')
   })
 
-  // A slow settings readback can report the retired live model after the error.
   it('leaves the saved pick alone when that settings report arrives late', async () => {
     claude.behave(SESSION, {
       sendsNoStartFrame: true,
@@ -147,7 +182,6 @@ describe("a Claude chat whose saved model the CLI says doesn't exist", () => {
     await host.flushStreamedEvents(SESSION)
     expect(host.deps.store.getRecord(SESSION)?.options?.model).toBe(RETIRED)
 
-    // The settings read gives up at its deadline and reports what the child showed.
     await vi.waitFor(
       () => expect(reports.mock.calls.map(([event]) => event.type)).toContain('options-reported'),
       { timeout: 5_000 }

@@ -47,6 +47,7 @@ export type TabsSlice = {
         | 'isPreview'
         | 'isPinned'
       > & {
+        validatePlacement: (state: AppState) => void
         targetGroupId: string
         /** Creates the tab in a new split group instead; wins over targetGroupId. */
         split: TabSplitTarget
@@ -116,7 +117,6 @@ export type TabsSlice = {
     }
   ) => void
   setTabLabel: (tabId: string, label: string) => void
-  /** Set a tab's view mode (terminal vs native chat). Patches only that tab. */
   setTabViewMode: (tabId: string, mode: 'terminal' | 'chat') => void
   /** Flip a tab between terminal and native-chat renderings; the live TerminalPane stays mounted. */
   toggleTabViewMode: (tabId: string) => void
@@ -162,8 +162,6 @@ export type TabsSlice = {
       groupId: string
       index?: number
       splitDirection?: TabSplitDirection
-      /** The split's new group id, as main minted it; layout-owner builds only. */
-      newGroupId?: string
     }
   ) => boolean
   setTabGroupSplitRatio: (worktreeId: string, nodePath: string, ratio: number) => void

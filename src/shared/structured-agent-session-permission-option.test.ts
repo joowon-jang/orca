@@ -39,6 +39,27 @@ function live(agent: string, current: AgentSessionOptionsResult['current'], auto
 }
 
 describe('the permission mode picker', () => {
+  it('keeps old-host fallback while capable hosts display only the nullable report', () => {
+    const pr1 = live('codex', { permissionMode: 'ask' })
+    expect(permission({ ...pr1, permissionOwnSupported: null })?.settable).toBe(false)
+    expect(permission({ ...pr1, permissionOwnSupported: false })).toMatchObject({
+      settable: true,
+      kind: { currentValue: 'ask' }
+    })
+    const capable = { ...pr1, permissionOwnSupported: true, permissionMode: 'own' }
+    for (const reportedPermissionMode of [undefined, null, 'full-access', 'read-only']) {
+      const descriptor = permission({ ...capable, reportedPermissionMode })
+      expect(descriptor).toMatchObject({
+        settable: typeof reportedPermissionMode === 'string',
+        kind: {
+          currentValue: reportedPermissionMode ?? undefined,
+          choices: expect.not.arrayContaining([expect.objectContaining({ value: 'own' })])
+        }
+      })
+    }
+    expect(permission({ ...capable, permissionMode: 'ask' })?.settable).toBe(false)
+  })
+
   it('shows the seeded mode before the agent starts, beside the quiet model pill', () => {
     const state = createStructuredAgentSessionOptionState(
       'codex',
@@ -66,7 +87,7 @@ describe('the permission mode picker', () => {
       {
         value: 'ask',
         label: 'Ask for approval',
-        description: 'Edits files and runs commands in this workspace; asks before anything else'
+        description: "Asks before edits or commands it isn't already allowed to make"
       },
       { value: 'auto', label: 'Approve for me', description: 'Reviews approval requests for you' },
       {
@@ -90,6 +111,14 @@ describe('the permission mode picker', () => {
       kind: { currentValue: 'auto' }
     })
     expect(offered(false, 'auto')).toEqual(['ask', 'accept-edits', 'auto', 'full-access'])
+    const changing = { ...live('claude', { permissionMode: 'ask' }, true), pendingId: 'model' }
+    expect(permission(changing)?.kind).toMatchObject({
+      choices: expect.not.arrayContaining([expect.objectContaining({ value: 'auto' })])
+    })
+    expect(permission({ ...changing, permissionMode: 'auto' })?.kind).toMatchObject({
+      currentValue: 'auto',
+      choices: expect.arrayContaining([expect.objectContaining({ value: 'auto' })])
+    })
   })
 
   // A new chat names no model: the host's catalog row for the CLI default decides, as the host's does.

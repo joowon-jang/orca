@@ -7,6 +7,7 @@ import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import type { Repo } from '../../../../shared/repo-types'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import { isSourceControlAgentDetectedAndEnabled } from './source-control-agent-action-dialog-support'
+import { resolveSourceControlActionRecipe } from '../../../../shared/source-control-ai'
 import { sourceControlActionRecipeMatchesTarget } from './source-control-action-recipe-match'
 
 type SavedSourceControlAgentActionTargetValue = 'repo' | 'global'
@@ -17,6 +18,8 @@ type UseSavedSourceControlAgentActionAutoStartArgs = {
   open: boolean
   openCycle: number
   detectionReady: boolean
+  /** This cycle's discovery was cancelled or failed: it verified nothing to start on. */
+  detectionFailed: boolean
   actionId: SourceControlLaunchActionId
   baseCommandInput: string
   savedAgentId?: TuiAgent | null
@@ -34,10 +37,7 @@ type UseSavedSourceControlAgentActionAutoStartArgs = {
   isStarting: boolean
   detectedAgents: TuiAgent[]
   disabledAgents: TuiAgent[] | undefined
-  onAutoStart: (args: {
-    detectedAgents: TuiAgent[]
-    saveTargetValue: SavedSourceControlAgentActionTargetValue
-  }) => Promise<boolean>
+  onAutoStart: (args: { detectedAgents: TuiAgent[] }) => Promise<boolean>
 }
 
 type SavedSourceControlAgentActionAutoStartResult = {
@@ -55,6 +55,7 @@ function buildSavedLaunchRecipe(input: {
   savedAgentId?: TuiAgent | null
   savedCommandInputTemplate?: string | null
   savedAgentArgs?: string | null
+  savedLaunchPreferences?: SourceControlActionRecipe['launchPreferences']
 }): SourceControlActionRecipe | null {
   if (!input.savedAgentId) {
     return null
@@ -62,7 +63,8 @@ function buildSavedLaunchRecipe(input: {
   return {
     agentId: input.savedAgentId,
     commandInputTemplate: input.savedCommandInputTemplate ?? '{basePrompt}',
-    agentArgs: input.savedAgentArgs ?? ''
+    agentArgs: input.savedAgentArgs ?? '',
+    ...(input.savedLaunchPreferences ? { launchPreferences: input.savedLaunchPreferences } : {})
   }
 }
 
@@ -109,6 +111,7 @@ function buildReceiptKey(input: {
   savedAgentId: TuiAgent
   savedCommandInputTemplate?: string | null
   savedAgentArgs?: string | null
+  savedLaunchPreferences?: SourceControlActionRecipe['launchPreferences']
   repoId?: string | null
   connectionId?: string | null
   worktreeId?: string | null
@@ -120,6 +123,7 @@ function buildReceiptKey(input: {
     input.savedAgentId,
     input.savedCommandInputTemplate ?? '{basePrompt}',
     input.savedAgentArgs ?? '',
+    input.savedLaunchPreferences ?? null,
     input.repoId ?? null,
     input.connectionId ?? null,
     input.worktreeId ?? null,
@@ -131,6 +135,7 @@ export function useSavedSourceControlAgentActionAutoStart({
   open,
   openCycle,
   detectionReady,
+  detectionFailed,
   actionId,
   baseCommandInput,
   savedAgentId,
@@ -153,14 +158,19 @@ export function useSavedSourceControlAgentActionAutoStart({
   const autoStartedOpenCycleRef = useRef(0)
   const [receiptState, setReceiptState] = useState<AutoLaunchReceiptState | null>(null)
 
+  const savedLaunchPreferences = useMemo(() => {
+    const effective = resolveSourceControlActionRecipe({ settings, repo, actionId })
+    return effective.agentId === savedAgentId ? effective.launchPreferences : undefined
+  }, [actionId, repo, savedAgentId, settings])
   const savedLaunchRecipe = useMemo(
     () =>
       buildSavedLaunchRecipe({
         savedAgentId,
         savedCommandInputTemplate,
-        savedAgentArgs
+        savedAgentArgs,
+        savedLaunchPreferences
       }),
-    [savedAgentArgs, savedAgentId, savedCommandInputTemplate]
+    [savedAgentArgs, savedAgentId, savedCommandInputTemplate, savedLaunchPreferences]
   )
   const matchedSavedReceiptTargetValue = useMemo(
     () =>
@@ -183,6 +193,7 @@ export function useSavedSourceControlAgentActionAutoStart({
       savedAgentId,
       savedCommandInputTemplate,
       savedAgentArgs,
+      savedLaunchPreferences,
       repoId,
       connectionId,
       worktreeId,
@@ -197,6 +208,7 @@ export function useSavedSourceControlAgentActionAutoStart({
     savedAgentArgs,
     savedAgentId,
     savedCommandInputTemplate,
+    savedLaunchPreferences,
     worktreeId
   ])
 
@@ -209,7 +221,8 @@ export function useSavedSourceControlAgentActionAutoStart({
     matchedSavedReceiptTargetValue &&
     receiptKey &&
     !consideredDifferentReceipt &&
-    !currentReceiptState?.revealed
+    !currentReceiptState?.revealed &&
+    !detectionFailed
   )
 
   useEffect(() => {
@@ -237,6 +250,11 @@ export function useSavedSourceControlAgentActionAutoStart({
     const revealDialog = (): void => {
       setReceiptState({ openCycle, receiptKey, revealed: true })
     }
+    // Recorded as revealed, so later healthy facts in this cycle never auto-start on another owner.
+    if (detectionFailed) {
+      revealDialog()
+      return
+    }
     if (!detectionReady || detecting || isStarting) {
       return
     }
@@ -253,10 +271,7 @@ export function useSavedSourceControlAgentActionAutoStart({
       return
     }
     autoStartedOpenCycleRef.current = openCycle
-    void onAutoStart({
-      detectedAgents,
-      saveTargetValue: matchedSavedReceiptTargetValue
-    })
+    void onAutoStart({ detectedAgents })
       .then((launched) => {
         if (!launched) {
           revealDialog()
@@ -268,6 +283,7 @@ export function useSavedSourceControlAgentActionAutoStart({
   }, [
     connectionUnavailable,
     detectedAgents,
+    detectionFailed,
     detectionReady,
     detecting,
     disabledAgents,

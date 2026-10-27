@@ -7,8 +7,7 @@ import type {
 
 export type { EmulatorBackendKind, EmulatorStreamCodec }
 
-// A device exposed by a backend, normalized across iOS (simulator UDID) and
-// Android (adb serial / AVD name). `id` is opaque and backend-resolved.
+// IDs are opaque selectors resolved by each backend (simulator UDID, adb serial, or AVD name).
 export type EmulatorDevice = {
   backend: EmulatorBackendKind
   id: string
@@ -18,8 +17,6 @@ export type EmulatorDevice = {
   isAvailable: boolean
 }
 
-// Which optional verbs a backend supports. The router uses these to reject
-// unsupported commands with a clear error instead of a silent no-op.
 export type EmulatorBackendCapabilities = {
   install: boolean
   launch: boolean
@@ -32,11 +29,9 @@ export type BackendAvailability = {
   available: boolean
   devices: EmulatorDevice[]
   message: string
-  // Resolved toolchain root when found (e.g. the Android SDK path), for setup UI.
   sdkPath?: string
 }
 
-// Target selectors accepted by the router's public input methods.
 export type EmulatorTargetOpts = {
   device?: string
   emulator?: string
@@ -62,10 +57,11 @@ export type EmulatorBackend = {
   isSupportedOnHost(): boolean
   checkAvailability(): Promise<BackendAvailability>
   listDevices(): Promise<EmulatorDevice[]>
+  /** Ids of devices confirmed running now; null when the host could not answer. */
+  listRunningDeviceIds?(): Promise<string[] | null>
   ownsDevice(id: string): Promise<boolean>
   resolveDeviceId(deviceOrName: string): Promise<string>
 
-  // Start (booting if needed) the helper/stream for a device and return its session.
   startSession(deviceId: string): Promise<EmulatorSessionInfo>
   // Stop the helper for a device without powering it off.
   stopHelperForDevice(deviceId: string, options?: EmulatorHelperStopOptions): Promise<void>
@@ -75,16 +71,13 @@ export type EmulatorBackend = {
   isSessionReusable(info: EmulatorSessionInfo): Promise<boolean>
 
   tap(deviceId: string, x: number, y: number): Promise<void>
-  // wsUrl is the iOS gesture stream from the registry; Android backends ignore it
-  // and drive their own control socket keyed by deviceId.
+  // Android ignores the iOS gesture URL and uses its own device control channel.
   gesture(deviceId: string, points: EmulatorGesturePoint[], wsUrl: string | null): Promise<void>
   type(deviceId: string, text: string): Promise<void>
   button(deviceId: string, name: string): Promise<void>
   rotate(deviceId: string, orientation: string): Promise<void>
   exec(deviceId: string, command: string): Promise<unknown>
 
-  // Capability-gated verbs. The router checks `capabilities`
-  // before calling these and rejects unsupported backends with emulator_unsupported.
   installApp?(deviceId: string, apkPath: string, options?: { reinstall?: boolean }): Promise<void>
   launchApp?(deviceId: string, packageName: string, activity?: string): Promise<void>
   setPermission?(

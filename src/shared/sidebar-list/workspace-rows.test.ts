@@ -3,10 +3,16 @@ import type { FolderWorkspace } from '../folder-workspace-types'
 import type { Repo } from '../repo-types'
 import type { Worktree } from '../worktree/types'
 import {
-  buildWorkspaceRows,
+  buildWorkspaceRows as buildKeyedWorkspaceRows,
   listGitWorkspaceRowKeys,
-  WorkspaceRowsSnapshotSchema
+  WorkspaceRowsSnapshotSchema,
+  type WorkspaceRow
 } from './workspace-rows'
+
+/** Permit literal row-key assertions. */
+const buildWorkspaceRows = (
+  catalog: Parameters<typeof buildKeyedWorkspaceRows>[0]
+): Map<string, WorkspaceRow> => new Map(buildKeyedWorkspaceRows(catalog))
 
 const localRepo: Repo = {
   id: 'repo-1',
@@ -183,7 +189,6 @@ describe('buildWorkspaceRows', () => {
     const otherRepo: Repo = { ...localRepo, id: 'repo-2', path: '/o' }
     const serverRepo: Repo = { ...localRepo, id: 'repo-3', executionHostId: 'runtime:env' }
     const worktrees = [
-      // A local row whose metadata names no host keeps an unqualified key.
       worktree({ id: 'repo-2::/o/a', repoId: 'repo-2' }),
       worktree({ hostId: 'local' }),
       worktree({ hostId: 'ssh:box' }),

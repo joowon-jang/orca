@@ -16,6 +16,11 @@ import type {
 } from '../codex-accounts/service'
 import type { CodexAccountSelectionTarget } from '../codex-accounts/runtime-selection'
 import type { RateLimitService } from '../rate-limits/service'
+import type {
+  HostAccountSignInChannel,
+  HostAccountSignInProvider,
+  HostAccountSignInStatus
+} from '../../shared/host-account-sign-in-types'
 import type { CodexRateLimitResetOutcome, RateLimitState } from '../../shared/rate-limit-types'
 import type { CodexResetCreditExpectedScope } from '../../shared/codex-reset-credit-scope'
 import type { CommitMessageAgentEnvironmentResolvers } from '../text-generation/commit-message-agent-environment'
@@ -98,7 +103,7 @@ export class RuntimeAccountController {
     try {
       this.persistHostLaunchEnv?.(launchEnv)
     } catch (error) {
-      // Why not refuse: the env already applies; only a restart before the next push loses it.
+      // Environment already applies; persistence failure loses it only on restart before the next push.
       console.warn('[accounts] Could not save the host account env:', error)
     }
   }
@@ -249,6 +254,17 @@ export class RuntimeAccountController {
 
   cancelClaudeSignIn(signIn: Omit<ClaudeAccountSignIn, 'configDir'>): Promise<void> {
     return this.requireServices().claudeAccounts.cancelSignIn(signIn)
+  }
+
+  /** Adds a host account whose login a client on another device finishes. */
+  async runHostSignIn(
+    provider: HostAccountSignInProvider,
+    channel: HostAccountSignInChannel
+  ): Promise<Pick<HostAccountSignInStatus, 'claude' | 'codex'>> {
+    const { claudeAccounts, codexAccounts } = this.requireServices()
+    return provider === 'claude'
+      ? { claude: await claudeAccounts.addAccountWithPastedCode(channel) }
+      : { codex: await codexAccounts.addAccountWithDeviceCode(channel) }
   }
 
   removeCodex(accountId: string): Promise<CodexRateLimitAccountsState> {

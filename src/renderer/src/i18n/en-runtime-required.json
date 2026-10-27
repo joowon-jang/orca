@@ -1,4 +1,11 @@
 {
+  "agentLaunch": {
+    "opencode": {
+      "invalidConfig": "OpenCode could not apply this model choice to the launch configuration. Check the OpenCode launch configuration and try again, or omit the model choice.",
+      "unsupportedLaunch": "OpenCode cannot apply this model choice to this launch. Start a fresh local terminal with supported launch arguments, or omit the model choice.",
+      "updateRequired": "OpenCode cannot safely start with a chosen model on this version. Update OpenCode to a supported release, or omit the model choice."
+    }
+  },
   "agentsSidebarIntro": {
     "migrated": {
       "action": "Open Agents"
@@ -72,6 +79,10 @@
         "9e3c49beb8": "Copy issue identifier",
         "af6e02c44a": "page",
         "f5a6b38a14": "sheet"
+      },
+      "NativeChatResumeOnRestartModal": {
+        "serverResumeHere": "Resume {{count}} chats started here",
+        "serverResumeHereOne": "Resume 1 chat started here"
       },
       "NewWorkspaceComposerCard": {
         "0e587e31fb": "yaml",
@@ -425,6 +436,9 @@
         },
         "editor": {
           "save": {
+            "notUtf8": {
+              "refused": "This file isn't UTF-8 text, so it wasn't saved."
+            },
             "sectionStale": {
               "notice": "This file changed on disk since this section loaded."
             },
@@ -601,6 +615,10 @@
             "1bf8c01c8b": "Switch to a Table view to work with this project in Orca."
           }
         }
+      },
+      "hostPicker": {
+        "moreHosts_one": "{{count}} more host. Search by name to find it.",
+        "moreHosts_other": "{{count}} more hosts. Search by name to find one."
       },
       "linear-issue-attribute-filter-dropdowns": {
         "optionsFromTeam": "Options from {{team}}"
@@ -836,6 +854,7 @@
             "15b7f210d7": "Review the prompt before starting an agent.",
             "1f7119f604": "Base",
             "2830dd64a2": "deleted",
+            "2f609a2e7c": "Delete all untracked",
             "3636d0f686": "ready",
             "383cf92c73": "tree",
             "3a231c845b": "unknown",
@@ -1256,7 +1275,8 @@
           "show": "Show"
         },
         "GitPane": {
-          "f35007e6e8": "git-username"
+          "f35007e6e8": "git-username",
+          "untrackedFirst": "Untracked first"
         },
         "GrokAccountsSection": {
           "c3d4e5f6a7": "Signed in. Orca only reads that file on disk — run grok login again if usage fails.",
@@ -1399,6 +1419,12 @@
         "NotificationsPane": {
           "274af61bc0": "system",
           "d3756cf5bc": "disabled"
+        },
+        "OrchestrationPane": {
+          "chatErrorEscalationKeywordChat": "chat",
+          "chatErrorEscalationKeywordError": "error",
+          "heartbeatKeywordHeartbeat": "heartbeat",
+          "heartbeatKeywordStalled": "stalled"
         },
         "OrchestrationSkillAgentCoverage": {
           "fullCoverage_one": "All 1 detected agent has the skill.",
@@ -1589,7 +1615,8 @@
           "fac59213fc": "Search builtin themes"
         },
         "SourceControlAiActionRecipeDefaults": {
-          "a9359c8aa9": "Unknown error"
+          "a9359c8aa9": "Unknown error",
+          "2cb4bb7e5d": "CLI arguments"
         },
         "SparsePresetSettingsSection": {
           "2d7d45e991": "Cancel",
@@ -1796,6 +1823,15 @@
             }
           }
         },
+        "claudeSubagentNavigation": {
+          "search": {
+            "mod": "mod",
+            "navigation": "navigation",
+            "plugin": "plugin",
+            "shortcut": "shortcut",
+            "subagent": "subagent"
+          }
+        },
         "computerUseSkillRuntime": {
           "thisDevice": "This device"
         },
@@ -1904,7 +1940,6 @@
           "outcome": {
             "activeServer": "Not done: this server is the default host for new projects. Choose another one in Advanced before stopping it."
           },
-          "row": {},
           "title": "Orca on your SSH hosts"
         },
         "mobile": {
@@ -1936,7 +1971,6 @@
             }
           }
         },
-        "serverList": {},
         "settingOwnership": {
           "clientDefaultProjectScopes": "Client default + project scopes",
           "terminalQuickCommands": "Commands are saved on this client, then scoped globally or to a project setup so they run from the selected terminal context."
@@ -1952,6 +1986,8 @@
           }
         },
         "sshHostServer": {
+          "automationsLeftDisabled_one": "This host’s Orca server took over {{count}} automation but couldn’t turn it back on. Turn it on in Automations.",
+          "automationsLeftDisabled_other": "This host’s Orca server took over {{count}} automations but couldn’t turn them back on. Turn them on in Automations.",
           "linkedProjects_one": "This host’s Orca server already had {{paths}}, so this desktop now uses the server’s copy. This desktop’s tabs and {{count}} automation there were not moved, and worktrees it created there show as external worktrees.",
           "linkedProjects_other": "This host’s Orca server already had {{paths}}, so this desktop now uses the server’s copy. This desktop’s tabs and {{count}} automations there were not moved, and worktrees it created there show as external worktrees.",
           "olderTerminals_one": "{{count}} terminal started by an older version of Orca is still running on this host, and it doesn’t stop on its own. Close it in that version of Orca or end it on the host, then reconnect.",
@@ -2028,6 +2064,9 @@
         },
         "wslHosts": {
           "remove": "Remove"
+        },
+        "RepositorySourceControlAiActionRows": {
+          "7a3a8e431d": "CLI arguments"
         }
       },
       "shared": {
@@ -2159,8 +2198,10 @@
           "ca74db7550": "Project on SSH host"
         },
         "WorktreeCardMeta": {
+          "ad25c3ff05": "View on {{value0}}",
           "ae76907ca6": "Unlink {{value0}}",
-          "eace1d2cf6": "neutral"
+          "eace1d2cf6": "neutral",
+          "reviewLinkLabel": "{{value0}} link"
         },
         "WorktreeCardMetadataStatusBadges": {
           "29df45afa2": "MR"
@@ -2168,6 +2209,10 @@
         "WorktreeCardPorts": {
           "34f733dda2": "Go to Worktree",
           "3e5f66564e": "Workspace unavailable"
+        },
+        "WorktreeCardReviewDetailSection": {
+          "copyLink": "Copy link",
+          "reviewHeader": "{{value0}} #{{value1}}"
         },
         "WorktreeIssueLinkField": {
           "0a7a2c6efd": "Not a GitHub issue number or issue URL.",
@@ -2512,7 +2557,13 @@
             "6d9793d4bc": "Resource Manager - Terminals",
             "996295bff2": "orphan terminal",
             "9e2525c89f": "Resident memory held by Orca plus the processes under each worktree's terminals.",
+            "bd19fd7a59": "Kill all sessions",
+            "c9382662bb": "Restart daemon",
             "e7ccce7e87": "of system RAM"
+          },
+          "SkillUpdateStatusSegment": {
+            "successMany": "Updated {{value0}} skills",
+            "successOne": "Updated {{value0}}"
           },
           "SshStatusSegment": {
             "3d0128b105": "connected",
@@ -2521,9 +2572,14 @@
             "bc5a3fd41a": "partial",
             "connectedHostCount_one": "{{count}} host",
             "connectedHostCount_other": "{{count}} hosts",
+            "connecting": "Connecting…",
             "d09ec41831": "Remote Hosts",
             "fbb3f9f05e": "conflict",
-            "fd9a3c600e": "error"
+            "fd9a3c600e": "error",
+            "moreSshHostMatches_one": "{{count}} more match. Keep typing to narrow it down.",
+            "moreSshHostMatches_other": "{{count}} more matches. Keep typing to narrow them down.",
+            "moreSshHosts_one": "Find {{count}} more SSH host…",
+            "moreSshHosts_other": "Find among {{count}} more SSH hosts…"
           },
           "StatusBar": {
             "06741a2f3d": "Open MiniMax usage details",
@@ -2588,7 +2644,9 @@
             "f7c3d7d5af": "Split Right"
           },
           "QuickLaunchButton": {
-            "chatLoading": "Checking chat support…"
+            "chatLoading": "Checking chat support…",
+            "hostUnreachable": "Can’t reach this workspace’s host to list its agents",
+            "needsServerUpdate": "Update Orca on this server to list this workspace’s agents"
           },
           "SortableTabContextMenu": {
             "0ce4bae39d": "Split Left",
@@ -2885,6 +2943,7 @@
         "nativeDropTempCopyFailed_other": "Orca couldn't copy {{count}} dropped files."
       },
       "useIpcEvents": {
+        "56d3ec4203": "Failed to create untitled markdown file.",
         "60428567b4": "Local terminal reveal is unavailable while a remote runtime is active",
         "f6300deb8b": "New Browser Tab"
       },
@@ -2901,6 +2960,16 @@
             }
           }
         }
+      },
+      "claudeAgentRowView": {
+        "restartRequired": "Restart Claude in this pane to enable subagent navigation. Recent Claude versions with Orca hooks are required."
+      },
+      "dropFailureReason": {
+        "changed": "The file changed while it was uploading. Try again.",
+        "disconnected": "The host is disconnected.",
+        "hostUnreachable": "The connection to the host changed or dropped. Try again.",
+        "noSpace": "The host is out of disk space.",
+        "tooLarge": "Too large to upload to this host."
       },
       "dropSkipReason": {
         "missing": "No longer at its original path.",
@@ -2967,6 +3036,25 @@
     "clientHosted": {
       "popupBlocked": "Popup blocked: {{origin}}"
     },
+    "loadFailure": {
+      "cantLoadPage": "Can't load this page",
+      "dnsDescription": "Check the address for typos.",
+      "dnsTitle": "Couldn't find {{host}}",
+      "notRunningDescription": "Start the dev server for this address.",
+      "notRunningSshDescription": "Start the dev server on the workspace's SSH host.",
+      "notRunningTitle": "Nothing is running on {{host}} yet",
+      "offlineTitle": "You're offline",
+      "refusedDescription": "The site may be down, or the address may be wrong.",
+      "refusedTitle": "{{host}} refused to connect",
+      "resetTitle": "The connection to {{host}} was interrupted",
+      "routeDownDescription": "This page loads through the workspace's SSH host, which isn't connected right now.",
+      "routeDownTitle": "Can't reach the SSH host",
+      "timeoutTitle": "{{host}} took too long to respond",
+      "waiting": "Reloads when the server responds",
+      "waitingForHost": "Reloads when the SSH host reconnects",
+      "waitingForNetwork": "Reloads when you're back online",
+      "waitingForServer": "Reloads when the server starts"
+    },
     "sshEgress": {
       "localChip": "This device"
     },
@@ -3029,7 +3117,8 @@
       },
       "composer": {
         "effort": "Effort",
-        "imageUnsupported": "Image paste is not supported for this agent."
+        "imageUnsupported": "Image paste is not supported for this agent.",
+        "placeholder": "Ask anything, @ to mention files, / for commands"
       },
       "failureWords": {
         "accountSwitchInProgress": "{{agent}}'s setup is changing on this host. Try again after it finishes.",
@@ -3067,7 +3156,7 @@
         "claudeManagedNotSignedIn": "This Claude account isn't signed in. Sign in again in Claude Accounts settings.",
         "claudeSystemNotSignedIn": "Claude isn't signed in. Run `{{loginCommand}}`, or choose an account in Claude Accounts settings.",
         "cliMissing": "{{agent}} wasn't found on the computer running this chat. Install it, or check its Command in Settings → Agents.",
-        "codexCliTooOld": "Codex {{installedVersion}} is too old for chats. Update to {{minimumVersion}} or newer.",
+        "cliTooOld": "{{agent}} {{installedVersion}} is too old for chats. Update to {{minimumVersion}} or newer.",
         "codexManagedNotSignedIn": "This Codex account isn't signed in. Sign in again in Codex Accounts settings.",
         "codexSystemNotSignedIn": "Codex isn't signed in. Run `{{loginCommand}}`.",
         "commandAfterAnswer": "Answer the agent's question or approval, then run /{{command}}.",
@@ -3114,6 +3203,9 @@
         "runCommandAgain": "Run /{{command}} again.",
         "runCommandWhenDone": "Run /{{command}} when it's done.",
         "runtimeNotInstalled": "{{agent}} isn't installed on the computer running this chat. Install it from the chat in a current version of Orca.",
+        "fullAccessAsRoot": "{{agent}} won't use Full access while it runs as root. Choose another permission for {{agent}} in Settings → Agents for the computer running this chat, then start a new chat.",
+        "conversationOpenElsewhere": "Codex is still holding this conversation open. Try again in a moment, or close other Codex terminals.",
+        "conversationOpenInTerminal": "{{agent}} is already running this conversation in another terminal. Quit {{agent}} there or close that terminal to continue here.",
         "sendAgainToTryOnceMore": "Send your message again to try once more.",
         "sendToTryAgain": "Send your message to try again.",
         "sessionNotRestored": "{{agent}} couldn't reopen its earlier session, so this chat continues in a new one. {{agent}} doesn't remember the earlier messages.",
@@ -3136,9 +3228,17 @@
         "usageLimitWindowWeeklyModel": "weekly model",
         "writeFailed": "Orca couldn't hand this message to the agent, so it was not sent."
       },
+      "goalControl": {
+        "pauseUnconfirmed": "Codex stopped running, but its goal pause was not confirmed. Check the goal before continuing.",
+        "settingsRejected": "Codex could not apply the selected model and effort. This goal change was not sent. Check the selection and try again.",
+        "settingsUnconfirmed": "Codex did not confirm the selected model and effort. This goal change was not sent. Check the chat and try again.",
+        "stopUnconfirmed": "Codex could not confirm Stop. Check the chat before continuing."
+      },
       "notices": {
         "compaction": "Context compacted",
         "contextCleared": "Context cleared",
+        "continuedOutside": "Continued outside this chat.",
+        "continuedOutsideRewound": "Continued outside this chat. Earlier replies above are no longer in this conversation's history.",
         "historyItemTooLarge": "This part of the chat was too large to show.",
         "historyRepaired": "Part of this chat's history couldn't be loaded.",
         "plan": "Plan"
@@ -3257,13 +3357,14 @@
         "historyUnusable": "Unable to load this chat.",
         "hostReconciling": "Orca is still checking on this chat after restarting.",
         "messageNotSaved": "Couldn't save your message.",
+        "messageTooLarge": "It is over the 256 KB limit for one message.",
         "messagesUnsettled": "A message you sent earlier isn't confirmed yet.",
         "notAvailable": "This isn't available in this chat.",
         "notDoneAnswer": "Your answer was not sent.",
         "notDoneCommand": "The command didn't run.",
-        "notDoneGoal": "The goal wasn't changed.",
-        "notDoneQueuedEdit": "Your edit wasn't saved.",
+        "notDoneGoalChangeIncomplete": "Couldn't finish changing the goal. Check the chat.",
         "notDoneOption": "The setting wasn't changed.",
+        "notDoneQueuedEdit": "Your edit wasn't saved.",
         "notDoneReadHistory": "This chat's history couldn't be loaded.",
         "notDoneSend": "Your message was not sent.",
         "notDoneStop": "The agent wasn't stopped.",
@@ -3287,6 +3388,7 @@
         "savedByNewerOrca": "Chats were saved by a newer Orca.",
         "sendOutcomeLost": "Orca couldn't confirm your message reached the agent. Check the chat, then send it again if needed.",
         "settleEarlierMessage": "Wait for your earlier message to go through, or retry it.",
+        "shortenMessage": "Shorten or split it, then send it again.",
         "shrinkQueue": "Delete a queued message, or wait for one to go through, then try again.",
         "startNewChat": "Start a new chat to continue.",
         "terminalAgentHoldsChat": "This chat is still open in a terminal agent.",
@@ -3311,6 +3413,18 @@
           "managePullRequests": "Read, comment on, and merge pull requests without leaving Orca",
           "reviewStatus": "See issue state, review status, and CI checks on every worktree",
           "startWorkspaceFromIssue": "Start a workspace from any GitHub issue or pull request, prefilled with its title and context"
+        }
+      }
+    },
+    "tab": {
+      "bar": {
+        "bulkClose": {
+          "confirm": "Close tabs",
+          "description": "The selected tabs will be closed. Pinned tabs will stay open.",
+          "editors": "Close all editor tabs?",
+          "left": "Close tabs to the left?",
+          "others": "Close other tabs?",
+          "right": "Close tabs to the right?"
         }
       }
     },
@@ -3340,6 +3454,16 @@
           "readyManyOne": "{{value0}} workspaces found, with 1 cleanup suggestion.",
           "readyOneMany": "1 workspace found, with {{value0}} cleanup suggestions.",
           "readyOneOne": "1 workspace found, with 1 cleanup suggestion."
+        }
+      },
+      "delete": {
+        "unsavedEdits": {
+          "blocked_one": "Save or close {{count}} unsaved file in {{name}} first",
+          "blocked_other": "Save or close {{count}} unsaved files in {{name}} first",
+          "closedToast_one": "Closed {{count}} file with unsaved edits from {{workspace}}",
+          "closedToast_other": "Closed {{count}} files with unsaved edits from {{workspace}}",
+          "discarded_one": "Unsaved edits in {{count}} file will be discarded:",
+          "discarded_other": "Unsaved edits in {{count}} files will be discarded:"
         }
       }
     }
@@ -3376,6 +3500,12 @@
   "menu": {
     "quitApp": "Quit {{appName}}"
   },
+  "resourceManager": {
+    "pty": {
+      "localOwnedCount_one": "{{count}} Orca PTY on this computer",
+      "localOwnedCount_other": "{{count}} Orca PTYs on this computer"
+    }
+  },
   "runtimeRpc": {
     "startupFailure": {
       "guidance": {
@@ -3388,6 +3518,22 @@
     }
   },
   "settings": {
+    "agents": {
+      "loadingHost": "Loading agent settings…",
+      "permissionChoiceDescription": "Applies where each agent supports this mode. Change one agent below.",
+      "permissionOverridesKept": "{{count}} agents still use their own permission setting:",
+      "permissionOverridesKept_one": "{{count}} agent still uses their own permission setting:",
+      "permissionOverridesKept_other": "{{count}} agents still use their own permission setting:",
+      "permissionOverridesFollow": "{{count}} agents now follow {{mode}}",
+      "permissionOverridesFollow_one": "{{count}} agent now follows {{mode}}",
+      "permissionOverridesFollow_other": "{{count}} agents now follow {{mode}}",
+      "permissionOverrideFollows": "{{agent}} now follows {{mode}}",
+      "permissionOverrideMore": "and {{count}} more",
+      "permissionOverrideMore_one": "and {{count}} more",
+      "permissionOverrideMore_other": "and {{count}} more",
+      "permissionOverridesUse": "Use {{mode}}",
+      "permissionEachOwnDescription": "Orca adds nothing; each CLI uses its own config"
+    },
     "browser": {
       "clientHostedRemote": {
         "description": "Render remote workspace pages on this desktop; network traffic still goes through the remote host. Applies to new pages only.",
@@ -3399,6 +3545,14 @@
         "probeAgain": "Check again",
         "probeSkippedHosts": "Hosts routed without the connection check (Try anyway):",
         "title": "Browse through SSH workspace hosts"
+      }
+    },
+    "sourceControl": {
+      "actionModel": {
+        "permissionsDefaultHint": "Terminals use Agent Permissions unless this action sets its own CLI arguments."
+      },
+      "actionPermissions": {
+        "sameAsAgent": "Same as {{agent}}"
       }
     }
   },
@@ -3416,6 +3570,11 @@
       "reopened_other": "Reopened {{count}} terminals",
       "resumed_one": "{{count}} agent session resumed.",
       "resumed_other": "{{count}} agent sessions resumed."
+    }
+  },
+  "workspace": {
+    "links": {
+      "manage": "Manage links…"
     }
   },
   "workspaceSpace": {

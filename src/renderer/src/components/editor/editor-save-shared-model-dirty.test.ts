@@ -1,5 +1,4 @@
-// Why: a model is dirty when any tab of it is. A clean tab of a dirty model must never be reloaded
-// on its own, left read-only without a banner, or sent into a reload loop.
+// Dirty records must retain every view’s edits and conflict state without per-view reloads.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ORCA_EDITOR_EXTERNAL_FILE_CHANGE_EVENT,
@@ -17,12 +16,7 @@ import {
   keepTabEditsOverExternalChange,
   overwriteDiskWithTabEdits
 } from './ExternalFileChangeBanner'
-import { isStaleCachedEditorText, mayPushTabTextIntoModel } from './editor-stale-mount-guard'
-import {
-  rollBackFailedMobileSave,
-  stampMobileVerifiedBaseline
-} from '@/runtime/mobile-markdown-save-rollback'
-import { EDITOR_STALE_SAVE_MESSAGE } from './editor-save-disk-precondition'
+import { isStaleCachedEditorText } from './editor-stale-mount-guard'
 import { stampCleanTabDiskBaseline } from './editor-clean-tab-disk-baseline'
 
 const mocks = vi.hoisted(() => ({ readRuntimeFileContent: vi.fn() }))
@@ -72,7 +66,7 @@ function openSharedTabsWithDirtySibling() {
   return { store, a, b, tab }
 }
 
-describe('a clean tab of a dirty shared model', () => {
+describe('a dirty record shown in several workspaces', () => {
   const dropped: string[] = []
   const onStale = (event: Event): void => {
     if (event instanceof CustomEvent) {
@@ -120,7 +114,6 @@ describe('a clean tab of a dirty shared model', () => {
 
   it('after a restart, a file changed while closed banners every tab of the model', async () => {
     const { store, a, b, tab } = openSharedTabsWithDirtySibling()
-    store.getState().setPendingDiskBaselineVerification(b.id, true)
     mocks.readRuntimeFileContent.mockResolvedValue({ content: 'E', isBinary: false })
 
     const detach = attachRestoredTabConflictScan(store)
@@ -136,7 +129,7 @@ describe('a clean tab of a dirty shared model', () => {
     }
   })
 
-  it('after Keep, a revealed sibling shows the kept edits: no eviction, no disk text into the model', async () => {
+  it('after Keep, every view shows the kept edits: no eviction, no disk text', async () => {
     const { store, a, b } = openSharedTabsWithDirtySibling()
     store.getState().setExternalMutation(b.id, 'changed')
     mocks.readRuntimeFileContent.mockResolvedValue({ content: 'E', isBinary: false })
@@ -145,49 +138,8 @@ describe('a clean tab of a dirty shared model', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     expect(dropped).toEqual([])
-    // A mounting with its cached disk text may not replace the model holding B's kept edits.
-    expect(mayPushTabTextIntoModel(a.id)).toBe(false)
+    expect(store.getState().editorDrafts[a.id]).toBe('unsaved in B')
     expect(store.getState().editorDrafts[b.id]).toBe('unsaved in B')
-  })
-
-  it('a phone save to a dirty model adopts nothing; after it fails the dirty sibling is still refused', async () => {
-    const { store, a, b, tab } = openSharedTabsWithDirtySibling()
-    const cleanup = attachEditorAutosaveController(store)
-    try {
-      // The agent wrote 'E'; the phone read it and saves through the clean tab A.
-      expect(stampMobileVerifiedBaseline(a, { content: 'E', source: 'file' })).toBeNull()
-      await expect(
-        requestEditorFileSave({ fileId: a.id, fallbackContent: 'phone', origin: 'mobile' })
-      ).rejects.toThrow(/changed on disk/)
-      expect(tab(a.id)?.lastKnownDiskSignature).toBe(getDiskBaselineSignature('S0'))
-
-      await expect(requestEditorFileSave({ fileId: b.id })).rejects.toThrow(/changed on disk/)
-    } finally {
-      cleanup()
-    }
-  })
-
-  it('restores the previous shared baseline when a phone save that adopted one fails', () => {
-    const { store, a, b, tab } = openSharedTabsWithDirtySibling()
-    store.getState().clearEditorDraft(b.id)
-    store.getState().markFileDirty(b.id, false)
-
-    const adopted = stampMobileVerifiedBaseline(tab(a.id)!, { content: 'E', source: 'file' })
-    expect(adopted).toEqual({
-      adopted: getDiskBaselineSignature('E'),
-      previous: getDiskBaselineSignature('S0')
-    })
-    rollBackFailedMobileSave(new Error(EDITOR_STALE_SAVE_MESSAGE), {
-      fileId: a.id,
-      injectedContent: 'phone',
-      previousDraft: undefined,
-      previousDirty: false,
-      stampedBaseline: adopted
-    })
-
-    for (const id of [a.id, b.id]) {
-      expect(tab(id)?.lastKnownDiskSignature).toBe(getDiskBaselineSignature('S0'))
-    }
   })
 
   it("drops a clean tab's leftover draft when the model moves to a newer load, so it cannot overwrite", async () => {
@@ -201,21 +153,19 @@ describe('a clean tab of a dirty shared model', () => {
     expect(store.getState().editorDrafts[b.id]).toBeUndefined()
     expect(tab(b.id)?.lastKnownDiskSignature).toBe(getDiskBaselineSignature('E'))
     expect(dropped).toEqual([b.id])
-    // Old text for B can no longer enter the model on remount.
     expect(isStaleCachedEditorText(b.id, 'S0')).toBe(true)
   })
 
-  it("Overwrite from a tab with no draft writes the model's unsaved text held by its sibling", async () => {
-    const { store, a, b } = openSharedTabsWithDirtySibling()
+  it("Overwrite from either view writes the record's one draft", async () => {
+    const { store, a } = openSharedTabsWithDirtySibling()
     const disk = stubGuardedDisk({ [GUARDED_PATH]: 'E' })
-    for (const id of [a.id, b.id]) {
-      store.getState().setExternalMutation(id, 'changed')
-    }
+    store.getState().setExternalMutation(a.id, 'changed')
     const cleanup = attachEditorAutosaveController(store)
     try {
-      expect(store.getState().editorDrafts[a.id]).toBeUndefined()
+      expect(store.getState().editorDrafts[a.id]).toBe('unsaved in B')
       expect(await overwriteDiskWithTabEdits(store.getState().openFiles[0])).toBe(true)
       expect(disk.files.get(GUARDED_PATH)).toBe('unsaved in B')
+      expect(store.getState().openFiles.every((tab) => !tab.isDirty)).toBe(true)
     } finally {
       cleanup()
     }
@@ -230,9 +180,7 @@ describe('a clean tab of a dirty shared model', () => {
     expect(disk.writeFile).not.toHaveBeenCalled()
   })
 
-  it('a tab joining a dirty model takes its baseline, so its save writes', async () => {
-    const { store, b } = openSharedTabsWithDirtySibling()
-    const disk = stubGuardedDisk({ [GUARDED_PATH]: 'S0' })
+  const openThirdView = (store: ReturnType<typeof createEditorStore>) => {
     store.setState({
       worktreesByRepo: {
         'repo-1': [
@@ -248,32 +196,38 @@ describe('a clean tab of a dirty shared model', () => {
       language: 'typescript',
       mode: 'edit'
     })
-    const joined = store.getState().openFiles.find((tab) => tab.worktreeId === 'wt-3')!
-    expect(joined.lastKnownDiskSignature).toBeUndefined()
+    return store.getState().openFiles.find((tab) => tab.worktreeId === 'wt-3')!
+  }
+
+  it('a view opened later joins the dirty record: its draft, dirty flag and baseline', async () => {
+    const { store, b } = openSharedTabsWithDirtySibling()
+    const disk = stubGuardedDisk({ [GUARDED_PATH]: 'S0' })
+    const joined = openThirdView(store)
+    expect(joined.isDirty).toBe(true)
+    expect(joined.lastKnownDiskSignature).toBe(getDiskBaselineSignature('S0'))
+    expect(store.getState().editorDrafts[joined.id]).toBe('unsaved in B')
     stampCleanTabDiskBaseline(joined.id, { content: 'S0', isBinary: false })
-    expect(
-      store.getState().openFiles.find((tab) => tab.id === joined.id)?.lastKnownDiskSignature
-    ).toBe(getDiskBaselineSignature('S0'))
     expect(store.getState().openFiles.every((tab) => tab.externalMutation === undefined)).toBe(true)
 
     store.getState().setEditorDraft(joined.id, 'from the new tab')
-    store.getState().markFileDirty(joined.id, true)
     const cleanup = attachEditorAutosaveController(store)
     try {
       await requestEditorFileSave({ fileId: joined.id })
       expect(disk.files.get(GUARDED_PATH)).toBe('from the new tab')
-      expect(store.getState().editorDrafts[b.id]).toBe('unsaved in B')
+      expect(store.getState().editorDrafts[b.id]).toBeUndefined()
+      expect(store.getState().openFiles.every((tab) => !tab.isDirty)).toBe(true)
     } finally {
       cleanup()
     }
   })
 
-  it('a tab joining a dirty model whose disk moved marks the model changed', () => {
+  it('a view joining a dirty record whose disk moved marks the record changed', () => {
     const { store, a, b, tab } = openSharedTabsWithDirtySibling()
-    store.getState().setLastKnownDiskSignature(a.id, undefined)
-    stampCleanTabDiskBaseline(a.id, { content: 'E', isBinary: false })
-    expect(tab(a.id)?.lastKnownDiskSignature).toBe(getDiskBaselineSignature('S0'))
-    expect(tab(a.id)?.externalMutation).toBe('changed')
-    expect(tab(b.id)?.externalMutation).toBe('changed')
+    const joined = openThirdView(store)
+    stampCleanTabDiskBaseline(joined.id, { content: 'E', isBinary: false })
+    for (const id of [a.id, b.id, joined.id]) {
+      expect(tab(id)?.lastKnownDiskSignature).toBe(getDiskBaselineSignature('S0'))
+      expect(tab(id)?.externalMutation).toBe('changed')
+    }
   })
 })

@@ -30,6 +30,7 @@ type ProfilePreferencesRuntime = Pick<
   | 'activeViewPreference'
   | 'githubCacheDirty'
   | 'githubCacheGeneration'
+  | 'githubCacheWriteListeners'
   | 'protectedSecrets'
   | 'runDurableMutation'
   | 'settingsChangeListeners'
@@ -173,7 +174,6 @@ export class ProfilePreferences {
     return this.getOnboarding()
   }
 
-  /** Fails closed: a missing or damaged record reads as no tip. */
   getNativeChatUpgradeTipVariant(): NativeChatUpgradeTipVariant {
     return nativeChatUpgradeTipVariant(
       parseNativeChatUpgradeTipAudience(
@@ -187,10 +187,20 @@ export class ProfilePreferences {
   }
 
   setGitHubCache(cache: PersistedState['githubCache']): void {
-    // Why no scheduleSave: cache is memory-only and snapshotted to a sidecar at flush; persisting here rewrote the whole state file every poll cycle.
+    // Cache polls write a sidecar at flush; scheduling a full profile save here amplifies every poll.
     this[profilePreferencesContext].runtime.state.githubCache = cache
     this[profilePreferencesContext].runtime.githubCacheDirty = true
     this[profilePreferencesContext].runtime.githubCacheGeneration += 1
+    for (const listener of this[profilePreferencesContext].runtime.githubCacheWriteListeners) {
+      listener()
+    }
+  }
+
+  onGitHubCacheWritten(listener: () => void): () => void {
+    this[profilePreferencesContext].runtime.githubCacheWriteListeners.add(listener)
+    return () => {
+      this[profilePreferencesContext].runtime.githubCacheWriteListeners.delete(listener)
+    }
   }
 }
 
@@ -210,7 +220,12 @@ export function notifyUIChanged(owner: ProfilePreferences): void {
   }
   const ui = owner.getUI()
   for (const listener of owner[profilePreferencesContext].runtime.uiChangeListeners) {
-    listener(ui)
+    // State is already applied; a broadcast failure must not fail the update (e.g. the shutdown checkpoint).
+    try {
+      listener(ui)
+    } catch (error) {
+      console.error('[preferences] UI change listener failed:', error)
+    }
   }
 }
 

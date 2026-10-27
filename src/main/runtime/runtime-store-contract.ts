@@ -47,6 +47,7 @@ export type RuntimeStore = {
   getAllWorkspaceLineage?: Store['getAllWorkspaceLineage']
   setWorkspaceLineage?: Store['setWorkspaceLineage']
   getGitHubCache: Store['getGitHubCache']
+  onGitHubCacheWritten?: Store['onGitHubCacheWritten']
   getWorkspaceSession?: Store['getWorkspaceSession']
   getWorkspaceSessionHostIds?: Store['getWorkspaceSessionHostIds']
   onWorkspaceSessionWritten?: Store['onWorkspaceSessionWritten']
@@ -72,11 +73,14 @@ export type RuntimeStore = {
   consumeOrcadMigrationTerminalRestoreHint?: Store['consumeOrcadMigrationTerminalRestoreHint']
   persistPtyBinding?: Store['persistPtyBinding']
   getPtyBindingGeneration?: Store['getPtyBindingGeneration']
+  getLayoutEditorViews?: Store['getLayoutEditorViews']
   admitTerminalPane?: Store['admitTerminalPane']
   withdrawTerminalPane?: Store['withdrawTerminalPane']
   applyLayoutCommand?: Store['applyLayoutCommand']
   applyTabRenames?: Store['applyTabRenames']
+  moveTerminalLeafToNewTab?: Store['moveTerminalLeafToNewTab']
   moveTabToWorkspaceAcrossPartitions?: Store['moveTabToWorkspaceAcrossPartitions']
+  applyEditorFileRenamesAcrossPartitions?: Store['applyEditorFileRenamesAcrossPartitions']
   getSshRemotePtyLeases?: Store['getSshRemotePtyLeases']
   getUI?: Store['getUI']
   onUIChanged?: Store['onUIChanged']
@@ -108,6 +112,8 @@ export type RuntimeStore = {
     agentWorkspaceTrustEnabled?: GlobalSettings['agentWorkspaceTrustEnabled']
     codexManagedAccounts?: GlobalSettings['codexManagedAccounts']
     nestedWorkerMaxDepth?: GlobalSettings['nestedWorkerMaxDepth']
+    orchestrationChatErrorEscalationEnabled?: GlobalSettings['orchestrationChatErrorEscalationEnabled']
+    orchestrationHeartbeatsEnabled?: GlobalSettings['orchestrationHeartbeatsEnabled']
     workspaceDir: string
     nestWorkspaces: boolean
     workspaceDirHistory?: GlobalSettings['workspaceDirHistory']
@@ -124,6 +130,8 @@ export type RuntimeStore = {
     agentCmdOverrides?: GlobalSettings['agentCmdOverrides']
     agentDefaultArgs?: GlobalSettings['agentDefaultArgs']
     agentDefaultEnv?: GlobalSettings['agentDefaultEnv']
+    agentPermissionDefault?: GlobalSettings['agentPermissionDefault']
+    agentPermissionOverrides?: GlobalSettings['agentPermissionOverrides']
     terminalWindowsShell?: GlobalSettings['terminalWindowsShell']
     // Read by the launch-line carry rule to name the shell a local line is typed into.
     terminalDefaultShell?: GlobalSettings['terminalDefaultShell']
@@ -131,6 +139,7 @@ export type RuntimeStore = {
     floatingTerminalCwd?: GlobalSettings['floatingTerminalCwd']
     floatingTerminalTrustedCwds?: GlobalSettings['floatingTerminalTrustedCwds']
     agentStatusHooksEnabled?: GlobalSettings['agentStatusHooksEnabled']
+    claudeSubagentNavigationEnabled?: GlobalSettings['claudeSubagentNavigationEnabled']
     followSymlinkedDirectories?: GlobalSettings['followSymlinkedDirectories']
     tabAutoGenerateTitle?: GlobalSettings['tabAutoGenerateTitle']
     terminalCopyTrimsGutter?: GlobalSettings['terminalCopyTrimsGutter']
@@ -158,8 +167,7 @@ export type RuntimeStore = {
     machineName?: GlobalSettings['machineName']
     voice?: VoiceSettings
     claudeAgentTeamsMode?: GlobalSettings['claudeAgentTeamsMode']
-    // Why: Phase-5 query responder kill switches — read per chunk in
-    // onPtyData to capture reply ownership at ingestion.
+    // Read query-responder kill switches per ingested chunk to capture reply ownership.
     terminalMainSideEffectAuthority?: GlobalSettings['terminalMainSideEffectAuthority']
     terminalHiddenDeliveryGate?: GlobalSettings['terminalHiddenDeliveryGate']
     terminalModelQueryAuthority?: GlobalSettings['terminalModelQueryAuthority']
@@ -170,7 +178,6 @@ export type RuntimeStore = {
     agentSkillSharingEnabled?: GlobalSettings['agentSkillSharingEnabled']
     nativeChatSessionOptions?: GlobalSettings['nativeChatSessionOptions']
     nativeChatPermissionMode?: GlobalSettings['nativeChatPermissionMode']
-    agentNativeChatPermissionModes?: GlobalSettings['agentNativeChatPermissionModes']
     nativeChatInlineVisuals?: GlobalSettings['nativeChatInlineVisuals']
     nativeChatInheritShellEnvironment?: GlobalSettings['nativeChatInheritShellEnvironment']
     nativeChatShellEnvironmentVariables?: GlobalSettings['nativeChatShellEnvironmentVariables']
@@ -178,9 +185,7 @@ export type RuntimeStore = {
     sourceControlAi?: GlobalSettings['sourceControlAi']
     commitMessageAi?: GlobalSettings['commitMessageAi']
   }
-  // Why: narrow to `unknown` return so test mocks can return void without
-  // a cast. The runtime never reads the return value — the persisted value
-  // is read back via getSettings() on the next access.
+  // Unknown return lets mocks return void; runtime reads persisted settings on next access, never this return.
   updateSettings?: (
     updates: Partial<GlobalSettings>,
     options?: { notifyListeners?: boolean; originWebContentsId?: number }

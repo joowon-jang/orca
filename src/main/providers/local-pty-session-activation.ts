@@ -61,7 +61,7 @@ export function activateLocalPtySession(args: {
   if (spawnedWslDistro !== undefined) {
     ptyWslDistroById.set(id, spawnedWslDistro)
   }
-  // Why both: launchAgent is explicit intent that survives command rewrites; recognition catches bare agent command lines.
+  // launchAgent survives command rewrites; recognition also catches typed agent commands.
   if (spawn.launchAgent || plan.startupAgentRecognition) {
     ptyAgentSessionIds.add(id)
   }
@@ -82,11 +82,13 @@ export function activateLocalPtySession(args: {
 
   const emitIngressData = (emission: PtyIngressEmission): void => {
     const sequenceChars = emission.rawEndSeq - emission.rawStartSeq
+    const { onData } = getOptions()
     if (emission.transformed || sequenceChars !== emission.data.length) {
-      getOptions().onData?.(id, emission.data, Date.now(), sequenceChars, true)
+      onData?.(id, emission.data, Date.now(), sequenceChars, true)
     } else {
-      getOptions().onData?.(id, emission.data, Date.now())
+      onData?.(id, emission.data, Date.now())
     }
+    const runtimeFed = onData ? true : undefined
     for (const cb of dataListeners) {
       cb(
         emission.transformed || sequenceChars !== emission.data.length
@@ -95,9 +97,10 @@ export function activateLocalPtySession(args: {
               data: emission.data,
               sequenceChars,
               seq: emission.rawEndSeq,
-              transformed: true
+              transformed: true,
+              runtimeFed
             }
-          : { id, data: emission.data }
+          : { id, data: emission.data, runtimeFed }
       )
     }
   }
@@ -113,7 +116,6 @@ export function activateLocalPtySession(args: {
   })
   startupIngressByPty.set(id, startupIngress)
 
-  // Shell-ready startup command support
   const readiness = createLocalPtyShellReadinessSession({
     id,
     spawn,
@@ -136,9 +138,7 @@ export function activateLocalPtySession(args: {
   const onExitDisposable = proc.onExit(({ exitCode, signal }) => {
     exitedBeforeSpawnReply = true
     discardStagedStartupCommand(staging)
-    // Why: node-pty reports a signalled death as {exitCode: 0, signal: N}; the
-    // cause is built here, where the signal and the spawn's trustworthiness
-    // are both still in hand.
+    // node-pty may pair exitCode 0 with a fatal signal; classify while signal and spawn provenance are available.
     const cause = resolveProcessExitCause({
       exitCode,
       signal,
@@ -155,13 +155,14 @@ export function activateLocalPtySession(args: {
     clearPtyState(id)
     startupIngress.drainAndClose()
     startupIngressByPty.delete(id)
-    // Why: release the master ptmx fd on natural exit, else a clean exit leaks the fd until GC. See docs/fix-pty-fd-leak.md.
+    // Release the natural-exit ptmx fd now instead of waiting for GC (docs/fix-pty-fd-leak.md).
     destroyPtyProcess(proc, { alreadyKilled: wasTerminationRequested })
     ptyReportsChildExitStatus.delete(id)
     if (!suppressExitCallbacks) {
-      getOptions().onExit?.(id, exitCode, incarnationId, cause)
+      const { onExit } = getOptions()
+      onExit?.(id, exitCode, incarnationId, cause)
       for (const cb of exitListeners) {
-        cb({ id, code: exitCode, incarnationId, cause })
+        cb({ id, code: exitCode, incarnationId, cause, runtimeFed: onExit ? true : undefined })
       }
     }
   })
@@ -215,13 +216,14 @@ export function activateLocalPtySession(args: {
     )
   }
 
-  // Why: publish the OS pid for the memory collector; proc.pid can be briefly 0/undefined before node-pty sees the child.
+  // Memory collection needs a proven positive OS PID; node-pty can briefly publish zero during spawn.
   const rawPid = proc.pid
   const pid = typeof rawPid === 'number' && Number.isFinite(rawPid) && rawPid > 0 ? rawPid : null
   return {
     id,
     incarnationId,
     pid,
+    startupCwdSource: 'request',
     ...(exitedBeforeSpawnReply ? { exitedBeforeSpawnReply: true } : {}),
     ...(spawnedWslDistro !== undefined ? { wslDistro: spawnedWslDistro } : {})
   }

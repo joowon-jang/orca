@@ -36,9 +36,6 @@ import type {
   EmulatorHelperStopOptions
 } from './emulator-backend'
 
-// The iOS/serve-sim backend: device/helper mechanics extracted from the former
-// monolithic EmulatorBridge. The bridge now routes to this (and, later, an
-// Android backend); per-worktree session state stays in the router.
 export class IosEmulatorBackend implements EmulatorBackend {
   readonly kind = 'ios' as const
   readonly streamCodec = 'mjpeg' as const
@@ -58,10 +55,7 @@ export class IosEmulatorBackend implements EmulatorBackend {
     this.waitForEndpointReady = options.waitForEndpointReady ?? waitForServeSimEndpointReady
   }
 
-  // Why: resolving the executable can materialize the serve-sim runtime (a one-time
-  // recursive copy + xattr subprocess on macOS after each version bump). Defer it
-  // off the startup path — the bridge is constructed before the main window shows —
-  // so it only runs when an emulator command is actually issued.
+  // Defer runtime materialization and its macOS copy/xattr work until the first emulator command.
   private get serveSimExecutable(): ServeSimExecutable {
     this.cachedServeSimExecutable ??= resolveServeSimExecutable()
     return this.cachedServeSimExecutable
@@ -76,7 +70,6 @@ export class IosEmulatorBackend implements EmulatorBackend {
   }
 
   async ownsDevice(id: string): Promise<boolean> {
-    // iOS only owns devices on macOS; otherwise it must not claim Android serials.
     if (!this.isSupportedOnHost()) {
       return false
     }
@@ -94,8 +87,6 @@ export class IosEmulatorBackend implements EmulatorBackend {
     return devices.map((device) => toEmulatorDevice(device))
   }
 
-  // iOS-specific passthroughs the router exposes for back-compat with the
-  // runtime/availability code (not part of the cross-backend interface).
   async listSimulators(): Promise<SimulatorDevice[]> {
     return listSimulatorDevices()
   }
@@ -223,8 +214,7 @@ export class IosEmulatorBackend implements EmulatorBackend {
       )
     }
 
-    // Why: CoreSimulator can report "Booted" with the display IO ports down
-    // (HID alive, no framebuffer); a shutdown/boot recycle is the only recovery.
+    // CoreSimulator can report Booted without framebuffer ports; retry once after shutdown/boot.
     let didRecycleWedgedBoot = false
     const startHelperRecyclingWedgedBoot = async (): Promise<EmulatorSessionInfo> => {
       try {
@@ -260,7 +250,7 @@ export class IosEmulatorBackend implements EmulatorBackend {
         )
       }
     }
-    // Why: serve-sim/CoreSimulator can surface Simulator.app while Orca embeds the stream.
+    // Keep the native Simulator window hidden while Orca embeds its stream.
     await hideNativeSimulatorApp().catch(() => {})
     return { ...info, streamCodec: 'mjpeg', backend: 'ios' }
   }
@@ -274,8 +264,7 @@ export class IosEmulatorBackend implements EmulatorBackend {
       return
     }
     await this.execServeSim(serveSimKillArgs(deviceId)).catch(() => {})
-    // Why: serve-sim --kill depends on its state file; stale helper binaries
-    // can survive state loss and keep old streams/listeners around.
+    // Stale helpers can outlive the state file that serve-sim --kill relies on.
     await killServeSimHelperProcessesForDevice(deviceId, options).catch(() => {})
   }
 
@@ -310,8 +299,6 @@ export class IosEmulatorBackend implements EmulatorBackend {
   }
 }
 
-// Why: serve-sim's capture helper prints exactly this when a booted device has
-// no com.apple.framebuffer.display IO port: the signature of a wedged boot.
 const MISSING_FRAMEBUFFER_RE = /No framebuffer display descriptor found/i
 
 function isMissingFramebufferError(error: unknown): error is EmulatorError {

@@ -1,7 +1,8 @@
 import {
   getRepoExecutionHostId,
   getSettingsFocusedExecutionHostId,
-  parseExecutionHostId
+  parseExecutionHostId,
+  type ExecutionHostId
 } from '../../../shared/execution-host'
 import type { GlobalSettings } from '../../../shared/global-settings-types'
 import type { Repo } from '../../../shared/repo-types'
@@ -22,23 +23,19 @@ function findRepoOwner(
   return matchingRepos.length === 1 ? matchingRepos[0] : null
 }
 
-/**
- * GitHub routing's twin pick, kept until `getGitHubRepoRoutingTarget` can refuse: dropping it would
- * send a twin on two servers to local IPC with this machine's credentials.
- */
-function findFocusedTwinRepoOwner(
+/** Resolve twins through caller host, else Active Server focus; this nonrefusable route must not fall to local IPC and this machine’s credentials. */
+function findTwinRepoOwner(
   state: RepoRuntimeOwnerState,
-  repoId: string
+  repoId: string,
+  hostId: ExecutionHostId | null | undefined
 ): Pick<Repo, 'id' | 'connectionId' | 'executionHostId'> | null {
   const matchingRepos = state.repos?.filter((entry) => entry.id === repoId) ?? []
   if (matchingRepos.length < 2) {
     return matchingRepos[0] ?? null
   }
-  const focusedHostId = getSettingsFocusedExecutionHostId(state.settings)
-  const focusedMatches = matchingRepos.filter(
-    (entry) => getRepoExecutionHostId(entry) === focusedHostId
-  )
-  return focusedMatches.length === 1 ? focusedMatches[0] : null
+  const pickHostId = hostId ?? getSettingsFocusedExecutionHostId(state.settings)
+  const hostMatches = matchingRepos.filter((entry) => getRepoExecutionHostId(entry) === pickHostId)
+  return hostMatches.length === 1 ? hostMatches[0] : null
 }
 
 /** Whether two rows (hosts) publish this repo id, so no host-less caller may pick one. */
@@ -77,17 +74,16 @@ export function getRuntimeEnvironmentIdForRepo(
     : state.settings?.activeRuntimeEnvironmentId?.trim() || null
 }
 
-// Why: PR mutations must not fall back to the globally focused runtime — a
-// repo without an explicit owner is a local repo, and routing it to the
-// focused runtime sends the mutation to a host that does not own it (#6957).
+// Unstamped repos are local; focus would send mutations to a nonowner (#6957). Only twins without caller-host evidence use focus.
 export function getExplicitRuntimeOwnerEnvironmentId(
   state: RepoRuntimeOwnerState,
-  repoId: string | null | undefined
+  repoId: string | null | undefined,
+  hostId?: ExecutionHostId | null
 ): string | null {
   if (!repoId) {
     return null
   }
-  const repo = findFocusedTwinRepoOwner(state, repoId)
+  const repo = findTwinRepoOwner(state, repoId, hostId)
   const hasExplicitOwner = Boolean(repo?.executionHostId?.trim() || repo?.connectionId?.trim())
   if (!repo || !hasExplicitOwner) {
     return null
@@ -96,8 +92,7 @@ export function getExplicitRuntimeOwnerEnvironmentId(
   return parsed?.kind === 'runtime' ? parsed.environmentId : null
 }
 
-// Why: a source without a runtime host inherits a repo's runtime owner only when exactly one
-// row has that id; duplicate ids across hosts fail closed to the source's own host (#7623).
+// Inherit repo runtime only for a unique ID; cross-host duplicates fail closed to the source’s own host (#7623).
 export function getHostlessSourceRepoOwnerEnvironmentId(
   repos: RepoRuntimeOwnerState['repos'],
   repoId: string | null | undefined

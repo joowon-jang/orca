@@ -1,6 +1,4 @@
-// A chat keeps, for each of its options it has none saved for, what its turn ran: the provider's
-// own evidence of the dispatch, else the message's choice and what its agent reports running. A
-// setting or a default the host filled in is never one.
+// Fill unsaved choices from execution evidence, never host-filled settings/defaults.
 
 import type { AgentSessionOptionsResult } from '../../../shared/agent-session-wire'
 import type { AgentSessionExecutionOptions } from '../../../shared/agent-session-execution-options'
@@ -26,11 +24,10 @@ export type StructuredAgentSessionHandedOptions = {
   executed?: Readonly<Record<string, string>>
 }
 
-/** In memory per child: what it last reported running, and a handed-over turn that still owes a
- *  record because nothing had named its model yet. */
+/** Per-child reports and a handed-over turn awaiting its first model evidence. */
 const childRuns = new WeakMap<
   StructuredAgentSessionProviderChild,
-  { reported?: RanOptions; owed?: StructuredAgentSessionHandedOptions }
+  { reported?: RanOptions; owed?: StructuredAgentSessionHandedOptions; permission?: string | null }
 >()
 
 function currentChild(context: RanOptionsContext, sessionId: string, fence: number) {
@@ -38,11 +35,32 @@ function currentChild(context: RanOptionsContext, sessionId: string, fence: numb
   return child?.fence === fence ? child : null
 }
 
-/** What a child last reported running, which a turn handed over with no choices of its own runs. */
 export function structuredAgentSessionChildRan(
   child: StructuredAgentSessionProviderChild
 ): RanOptions | undefined {
   return childRuns.get(child)?.reported
+}
+
+/** The current child's startup report or applied evidence; never saved intent or send authority. */
+export function structuredAgentSessionRuntimePermission(
+  child: StructuredAgentSessionProviderChild | undefined
+): { fence: number; mode: string | null } | null {
+  const mode = child && childRuns.get(child)?.permission
+  return child?.phase === 'ready' && mode !== undefined ? { fence: child.fence, mode } : null
+}
+
+export function noteStructuredAgentSessionRuntimePermission(
+  child: StructuredAgentSessionProviderChild,
+  reported: AgentSessionOptionsResult['current'],
+  initial = false
+): void {
+  const previous = childRuns.get(child)
+  if (
+    reported.reportedPermissionMode !== undefined &&
+    (!initial || previous?.permission === undefined)
+  ) {
+    childRuns.set(child, { ...previous, permission: reported.reportedPermissionMode })
+  }
 }
 
 function reportedRan(reported: AgentSessionOptionsResult['current']): RanOptions | null {
@@ -55,12 +73,12 @@ function reportedRan(reported: AgentSessionOptionsResult['current']): RanOptions
     model,
     ...(effort && !filled.includes('effort') ? { effort } : {}),
     ...(serviceTier ? { serviceTier } : {}),
-    // Only Fast routed on ran; an off state may just be Fast unavailable to this account.
+    // Persist only confirmed Fast-on; off may mean this account cannot use Fast.
     ...(fastMode && fastModeState === 'on' ? { fastMode: 'true' } : {})
   }
 }
 
-/** Notes what a child reports running; a turn handed over before any report records it now. */
+/** Resolve delayed model evidence for an already handed-over turn. */
 export async function noteStructuredAgentSessionReportedOptions(
   context: RanOptionsContext,
   sessionId: string,
@@ -73,24 +91,56 @@ export async function noteStructuredAgentSessionReportedOptions(
     return
   }
   const runs = childRuns.get(child)
-  childRuns.set(child, { reported: ran })
-  if (runs?.owed) {
-    await recordStructuredAgentSessionRanOptions(context, sessionId, fence, runs.owed)
+  childRuns.set(child, { ...runs, reported: ran })
+  if (runs?.owed && ran.model) {
+    const owed = runs.owed
+    await recordStructuredAgentSessionRanOptions(context, sessionId, fence, {
+      ...owed,
+      ...(owed.executed ? { executed: { ...owed.executed, model: ran.model } } : {})
+    })
   }
 }
 
-/** Records, for a chat's child at `fence`, what a message handed over to it ran. */
 export type StructuredAgentSessionRanRecorder = (
   sessionId: string,
   fence: number
-) => (handed: StructuredAgentSessionHandedOptions) => Promise<void>
+) => ((handed: StructuredAgentSessionHandedOptions) => Promise<void>) & {
+  prepareInput?: () => void
+  checkpoint?: () => void
+}
 
-/** After a turn was handed over; bookkeeping, so a failure is logged and never refuses the send. */
+/** Capture report identity at input to preserve early reports and avoid stale fallbacks. */
+export function createStructuredAgentSessionRanRecorder(
+  context: RanOptionsContext,
+  sessionId: string,
+  fence: number
+): ReturnType<StructuredAgentSessionRanRecorder> {
+  let checkpoint: { reported?: RanOptions } | undefined
+  return Object.assign(
+    (handed: StructuredAgentSessionHandedOptions) =>
+      recordStructuredAgentSessionRanOptions(context, sessionId, fence, handed, checkpoint),
+    {
+      prepareInput: () => {
+        const child = currentChild(context, sessionId, fence)
+        if (child) {
+          delete childRuns.get(child)?.owed
+        }
+      },
+      checkpoint: () => {
+        const child = currentChild(context, sessionId, fence)
+        checkpoint = { reported: child ? childRuns.get(child)?.reported : undefined }
+      }
+    }
+  )
+}
+
+/** Post-handover bookkeeping failures log without refusing the send. */
 export async function recordStructuredAgentSessionRanOptions(
   context: RanOptionsContext,
   sessionId: string,
   fence: number,
-  handed: StructuredAgentSessionHandedOptions
+  handed: StructuredAgentSessionHandedOptions,
+  checkpoint?: { reported?: RanOptions }
 ): Promise<void> {
   const child = currentChild(context, sessionId, fence)
   const { store, logger, agents } = context.deps
@@ -100,14 +150,15 @@ export async function recordStructuredAgentSessionRanOptions(
   }
   const { message, executed } = handed
   const reported = childRuns.get(child)?.reported
-  const model = executed?.model ?? message?.model ?? reported?.model
-  childRuns.set(child, { ...(reported ? { reported } : {}), ...(model ? {} : { owed: handed }) })
+  const newerModel = checkpoint && reported !== checkpoint.reported ? reported?.model : undefined
+  const model = executed
+    ? (executed.model ?? message?.model ?? newerModel)
+    : (message?.model ?? reported?.model)
+  childRuns.set(child, { ...childRuns.get(child), owed: model ? undefined : handed })
   if (!model) {
     return
   }
-  // The dispatch's own evidence, where the agent gives it; else the message's effort and what the
-  // report says ran with its own model (a message's tier or Fast may not have run: a steer runs its
-  // turn's).
+  // Prefer dispatch proof; fallback tier/Fast must match the reported model because steers inherit turn choices.
   const report: RanOptions = reported?.model === model ? reported : {}
   const proposed: Readonly<Record<string, string | undefined>> = executed ?? {
     effort: message?.effort ?? report.effort,
@@ -116,7 +167,7 @@ export async function recordStructuredAgentSessionRanOptions(
   }
   const ran: Record<string, string> = {}
   for (const [key, value] of Object.entries({ ...proposed, model })) {
-    // Never one every later send would carry and the agent refuse as a choice.
+    // Persist only choices the agent can accept on future sends.
     if (
       value &&
       !structuredAgentSessionOptionOverridesRefusal(agents, record.provider, { [key]: value })
